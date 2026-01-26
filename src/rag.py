@@ -44,6 +44,7 @@ class RAGResponse:
     retrieved_bets: List[Bet]  # The bets that were retrieved
     query: str
     sufficient_evidence: bool = True
+    stats_context: Optional[str] = None  # Pre-computed SQL statistics
 
 
 class RAGAssistant:
@@ -84,14 +85,14 @@ class RAGAssistant:
         
         Args:
             query: The user's question
-            top_k: Maximum number of bets to retrieve
+            top_k: Maximum number of bet ROWS to show (aggregations always use full data)
             include_aggregations: Whether to include aggregate stats in context
             
         Returns:
             RAGResponse with answer, citations, and metadata
         """
-        # Step 1: Retrieve relevant bets
-        results = self._retrieve_for_query(query, top_k)
+        # Step 1: Retrieve relevant bets (for row-level context)
+        results, all_results_count = self._retrieve_for_query(query, top_k)
         
         if not results:
             return RAGResponse(
@@ -104,16 +105,22 @@ class RAGAssistant:
                 sufficient_evidence=False
             )
         
-        # Step 2: Format context
-        context = self._format_context(results, query, include_aggregations)
+        # Step 2: Compute SQL-based aggregations (ALWAYS on full dataset, not just top_k)
+        stats_context = self._compute_sql_aggregations(query)
         
-        # Step 3: Generate answer
+        # Step 3: Format row context (limited to top_k for readability)
+        row_context = self._format_row_context(results, top_k)
+        
+        # Step 4: Combine contexts
+        context = self._build_full_context(row_context, stats_context, all_results_count, top_k)
+        
+        # Step 5: Generate answer
         answer = self._generate_answer(query, context)
         
-        # Step 4: Extract citations
+        # Step 6: Extract citations
         citations = self._extract_citations(answer, results)
         
-        # Step 5: Check if evidence was sufficient
+        # Step 7: Check if evidence was sufficient
         sufficient = not any(phrase in answer.lower() for phrase in [
             "i need", "please provide", "not enough information",
             "couldn't find", "no records", "insufficient"
@@ -124,57 +131,149 @@ class RAGAssistant:
             citations=citations,
             retrieved_bets=[r.bet for r in results],
             query=query,
-            sufficient_evidence=sufficient
+            sufficient_evidence=sufficient,
+            stats_context=stats_context
         )
     
     def _retrieve_for_query(
         self, 
         query: str, 
         top_k: int
-    ) -> List[RetrievalResult]:
+    ) -> Tuple[List[RetrievalResult], int]:
         """
         Retrieve relevant bets based on query analysis.
         
-        Uses smart retrieval that auto-detects query intent.
+        Returns:
+            Tuple of (results, total_matching_count)
+            - results: Limited to top_k for context
+            - total_matching_count: Full count for accurate reporting
         """
-        # Use the smart retriever which handles:
-        # - Bet ID extraction (B0042)
-        # - Customer ID extraction (C068)
-        # - Incident tag detection (LATENCY_SPIKE)
-        # - Status detection (REJECTED)
-        # - Latency queries (highest delay)
-        # - Semantic search for general queries
-        
-        results = self.retriever.retrieve(query, top_k=top_k)
-        
-        # For aggregation queries, we might need more context
         query_lower = query.lower()
         
-        # If asking about "most impacted" customers, get full incident data
-        if "most" in query_lower and ("impact" in query_lower or "affect" in query_lower):
-            incident = self.retriever._extract_incident_tag(query)
-            if incident:
-                # Get all bets with this incident for proper aggregation
-                results = self.retriever.filter_by_incident(incident)
+        # Check for specific bet ID - return exact match
+        bet_id_match = self.retriever._extract_bet_id(query)
+        if bet_id_match:
+            result = self.retriever.get_bet(bet_id_match)
+            if result:
+                return [result], 1
+            return [], 0
         
-        # If asking about "highest" or "top" delays
+        # Check for customer ID - return ALL customer bets (no truncation)
+        customer_id_match = self.retriever._extract_customer_id(query)
+        if customer_id_match:
+            results = self.retriever.get_customer_bets(customer_id_match)
+            return results, len(results)  # Return all for customer queries
+        
+        # Check for incident tag - return ALL matching bets
+        incident_match = self.retriever._extract_incident_tag(query)
+        if incident_match:
+            results = self.retriever.filter_by_incident(incident_match)
+            return results, len(results)  # Return all for incident queries
+        
+        # Check for status - return ALL matching bets
+        status_match = self.retriever._extract_status(query)
+        if status_match:
+            results = self.retriever.filter_by_status(status_match)
+            return results, len(results)
+        
+        # Check for top/highest delay queries
         if ("highest" in query_lower or "top" in query_lower) and self.retriever._is_latency_query(query):
             limit = self.retriever._extract_number(query) or 5
             results = self.retriever.get_top_by_delay(limit)
+            return results, len(results)
         
-        return results
+        # Default: semantic search (this is where top_k matters)
+        results = self.retriever.retrieve(query, top_k=top_k)
+        return results, len(results)
     
-    def _format_context(
-        self, 
-        results: List[RetrievalResult],
-        query: str,
-        include_aggregations: bool
-    ) -> str:
-        """Format retrieved bets as context for the LLM."""
+    def _compute_sql_aggregations(self, query: str) -> Optional[str]:
+        """
+        Compute aggregations via SQL based on query type.
         
-        lines = ["=== RETRIEVED BET RECORDS ===\n"]
+        This ensures aggregations are ALWAYS computed on the full dataset,
+        not just the top_k rows shown to the LLM.
+        """
+        query_lower = query.lower()
+        lines = []
         
-        for i, result in enumerate(results, 1):
+        # Customer-specific aggregations
+        customer_id = self.retriever._extract_customer_id(query)
+        if customer_id:
+            stats = self.db.get_customer_stats(customer_id)
+            if stats:
+                lines.append("=== COMPLETE CUSTOMER STATISTICS (from database) ===")
+                lines.append(f"Customer: {stats['customer_id']}")
+                lines.append(f"Total Bets: {stats['total_bets']}")
+                lines.append(f"Total Stake: £{stats['total_stake']:.2f}")
+                lines.append(f"Average Stake: £{stats['avg_stake']:.2f}")
+                lines.append(f"Average Delay: {stats['avg_delay']:.0f}ms")
+                lines.append(f"Delay Range: {stats['min_delay']}ms - {stats['max_delay']}ms")
+                lines.append(f"Status Breakdown: {stats['status_breakdown']}")
+                lines.append(f"Incident Breakdown: {stats['incident_breakdown']}")
+                lines.append(f"Sport Breakdown: {stats['sport_breakdown']}")
+                lines.append("")
+                return "\n".join(lines)
+        
+        # Incident-specific aggregations
+        incident_tag = self.retriever._extract_incident_tag(query)
+        if incident_tag:
+            stats = self.db.get_incident_stats(incident_tag)
+            if stats:
+                lines.append("=== COMPLETE INCIDENT STATISTICS (from database) ===")
+                lines.append(f"Incident Type: {stats['incident_tag']}")
+                lines.append(f"Total Bets Affected: {stats['total_bets']}")
+                lines.append(f"Unique Customers Affected: {stats['unique_customers']}")
+                lines.append(f"Total Stake at Risk: £{stats['total_stake']:.2f}")
+                lines.append(f"Average Stake: £{stats['avg_stake']:.2f}")
+                lines.append(f"Average Delay: {stats['avg_delay']:.0f}ms")
+                lines.append(f"Delay Range: {stats['min_delay']}ms - {stats['max_delay']}ms")
+                lines.append(f"Status Breakdown: {stats['status_breakdown']}")
+                lines.append("")
+                lines.append("Customers Ranked by Impact:")
+                for i, cust in enumerate(stats['customers_affected'], 1):
+                    lines.append(f"  {i}. {cust['customer_id']}: {cust['bet_count']} bet(s), max delay {cust['max_delay']}ms")
+                lines.append("")
+                return "\n".join(lines)
+        
+        # Status-specific aggregations
+        status = self.retriever._extract_status(query)
+        if status:
+            stats = self.db.get_status_stats(status)
+            if stats:
+                lines.append("=== COMPLETE STATUS STATISTICS (from database) ===")
+                lines.append(f"Status: {stats['status']}")
+                lines.append(f"Total Bets: {stats['total_bets']}")
+                lines.append(f"Unique Customers: {stats['unique_customers']}")
+                lines.append(f"Total Stake: £{stats['total_stake']:.2f}")
+                lines.append(f"Average Stake: £{stats['avg_stake']:.2f}")
+                lines.append(f"Average Delay: {stats['avg_delay']:.0f}ms")
+                lines.append(f"Incident Breakdown: {stats['incident_breakdown']}")
+                lines.append("")
+                return "\n".join(lines)
+        
+        # Top delay aggregations
+        if ("highest" in query_lower or "top" in query_lower) and self.retriever._is_latency_query(query):
+            limit = self.retriever._extract_number(query) or 5
+            stats = self.db.get_top_delay_stats(limit)
+            if stats:
+                lines.append(f"=== TOP {limit} DELAY STATISTICS (from database) ===")
+                lines.append(f"Total Stake: £{stats['total_stake']:.2f}")
+                lines.append(f"Delay Range: {stats['min_delay']}ms - {stats['max_delay']}ms")
+                lines.append(f"Average Delay: {stats['avg_delay']:.0f}ms")
+                lines.append(f"Incident Breakdown: {stats['incident_breakdown']}")
+                lines.append(f"Status Breakdown: {stats['status_breakdown']}")
+                lines.append("")
+                return "\n".join(lines)
+        
+        return None
+    
+    def _format_row_context(self, results: List[RetrievalResult], max_rows: int) -> str:
+        """Format individual bet rows for context (limited to max_rows)."""
+        lines = ["=== BET RECORDS (for evidence/citations) ===\n"]
+        
+        display_results = results[:max_rows]
+        
+        for i, result in enumerate(display_results, 1):
             bet = result.bet
             lines.append(f"Record {i}:")
             lines.append(f"  Bet ID: {bet.bet_id}")
@@ -189,46 +288,42 @@ class RAGAssistant:
             lines.append(f"  Price Delay: {bet.price_delay_ms}ms")
             lines.append("")
         
-        # Add aggregations for certain query types
-        if include_aggregations and len(results) > 1:
-            lines.append("=== SUMMARY STATISTICS ===")
-            
-            bets = [r.bet for r in results]
-            
-            # Status breakdown
-            statuses = {}
-            for bet in bets:
-                statuses[bet.status] = statuses.get(bet.status, 0) + 1
-            lines.append(f"Status breakdown: {statuses}")
-            
-            # Incident breakdown
-            incidents = {}
-            for bet in bets:
-                incidents[bet.incident_tag] = incidents.get(bet.incident_tag, 0) + 1
-            lines.append(f"Incident breakdown: {incidents}")
-            
-            # Customer breakdown (for incident queries)
-            customers = {}
-            for bet in bets:
-                customers[bet.customer_id] = customers.get(bet.customer_id, 0) + 1
-            if len(customers) < len(bets):  # Only show if there are repeat customers
-                lines.append(f"Customers affected: {len(customers)} unique")
-                # Show top affected customers
-                sorted_customers = sorted(customers.items(), key=lambda x: x[1], reverse=True)
-                top_customers = sorted_customers[:5]
-                lines.append(f"Most affected customers: {top_customers}")
-            
-            # Delay statistics
-            delays = [bet.price_delay_ms for bet in bets]
-            lines.append(f"Delay range: {min(delays)}ms - {max(delays)}ms")
-            lines.append(f"Average delay: {sum(delays)/len(delays):.0f}ms")
-            
-            # Total stake
-            total_stake = sum(bet.stake_gbp for bet in bets)
-            lines.append(f"Total stake: £{total_stake:.2f}")
-            lines.append("")
-        
         return "\n".join(lines)
+    
+    def _build_full_context(
+        self, 
+        row_context: str, 
+        stats_context: Optional[str],
+        total_count: int,
+        shown_count: int
+    ) -> str:
+        """Combine row context and stats context with clear separation."""
+        parts = []
+        
+        # Add stats context first (this is the authoritative data)
+        if stats_context:
+            parts.append(stats_context)
+            parts.append("IMPORTANT: Use the statistics above for any counts, totals, or averages.")
+            parts.append("The bet records below are for evidence/citation purposes.\n")
+        
+        # Note if we're showing a subset
+        if total_count > shown_count:
+            parts.append(f"Note: Showing {shown_count} of {total_count} matching records.\n")
+        
+        # Add row context
+        parts.append(row_context)
+        
+        return "\n".join(parts)
+    
+    # Keep old method for backwards compatibility but mark deprecated
+    def _format_context(
+        self, 
+        results: List[RetrievalResult],
+        query: str,
+        include_aggregations: bool
+    ) -> str:
+        """DEPRECATED: Use _format_row_context + _compute_sql_aggregations instead."""
+        return self._format_row_context(results, len(results))
     
     def _generate_answer(self, query: str, context: str) -> str:
         """Generate an answer using the LLM."""
@@ -261,16 +356,57 @@ Please answer the question based ONLY on the bet records above. Remember to cite
     
     def _generate_fallback_answer(self, query: str, context: str) -> str:
         """Generate a fallback answer when LLM returns empty response."""
-        # This is a safety net - extract key info from context
         import re
         
-        # Extract bet IDs from context
+        # Extract stats from context if present
+        stats_lines = []
+        total_bets_from_stats = None
+        
+        if "COMPLETE" in context and "STATISTICS" in context:
+            # Parse the stats section
+            in_stats = False
+            for line in context.split('\n'):
+                if "COMPLETE" in line and "STATISTICS" in line:
+                    in_stats = True
+                    continue
+                if in_stats:
+                    if line.startswith("===") or line.startswith("IMPORTANT"):
+                        break
+                    if line.strip():
+                        stats_lines.append(line.strip())
+                        # Extract total bets count
+                        if "Total Bets:" in line:
+                            match = re.search(r'Total Bets:\s*(\d+)', line)
+                            if match:
+                                total_bets_from_stats = int(match.group(1))
+        
+        # Extract bet IDs from context (these are the displayed ones)
         bet_ids = re.findall(r'Bet ID: (B\d{4})', context)
         
-        if not bet_ids:
+        if not bet_ids and not stats_lines:
             return "I found relevant records but couldn't generate a summary. Please try rephrasing your question."
         
-        return f"I found {len(bet_ids)} relevant bet(s): {', '.join(bet_ids)}. Please review the context above for details.\n\nEvidence: {', '.join(bet_ids)}"
+        # Build a proper fallback response
+        answer_parts = []
+        
+        # Include stats if we found them
+        if stats_lines:
+            answer_parts.append("Based on the database statistics:\n")
+            for line in stats_lines[:10]:  # First 10 stats lines
+                answer_parts.append(f"• {line}")
+            answer_parts.append("")
+        
+        # Include bet count - use stats count if available (authoritative)
+        actual_count = total_bets_from_stats or len(bet_ids)
+        
+        if bet_ids:
+            if actual_count <= 10:
+                answer_parts.append(f"This covers {actual_count} bet(s): {', '.join(bet_ids)}")
+            else:
+                answer_parts.append(f"This covers {actual_count} bet(s). Sample: {', '.join(bet_ids[:10])}")
+            answer_parts.append(f"\nEvidence: {', '.join(bet_ids)}")
+        
+        return "\n".join(answer_parts)
     
     def _extract_citations(
         self, 

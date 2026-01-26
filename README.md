@@ -13,7 +13,16 @@ This assistant helps ops teams query bet records using a hybrid retrieval approa
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         CLI Interface                           │
-│                    (search, filter, stats)                      │
+│               (ask, chat, search, filter, stats)                │
+└─────────────────────────────────────────────────────────────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                        RAG Layer                                │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │   Query     │  │  Context    │  │   LLM Generation        │ │
+│  │  Analysis   │→ │  Formatting │→ │   (GPT-5-nano)          │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
                                │
                                ▼
@@ -42,6 +51,14 @@ This assistant helps ops teams query bet records using a hybrid retrieval approa
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### RAG Workflow
+
+1. **Query Analysis**: Extract bet IDs, customer IDs, incidents, or keywords
+2. **Smart Retrieval**: Choose optimal retrieval strategy based on query type
+3. **Context Formatting**: Format retrieved bets as structured context for LLM
+4. **LLM Generation**: Generate grounded answer using GPT-5-nano with strict citation rules
+5. **Citation Extraction**: Parse and validate bet ID citations from response
+
 ## Project Structure
 
 ```
@@ -57,6 +74,7 @@ sportsbook-rag/
 │   ├── database.py      # SQLite + vector storage
 │   ├── ingestion.py     # CSV loading and embedding generation
 │   ├── retrieval.py     # Retrieval strategies
+│   ├── rag.py           # RAG generation with LLM
 │   └── cli.py           # Command-line interface
 ├── data/
 │   └── bets.csv         # Bet data (100 rows)
@@ -99,6 +117,24 @@ This will:
 - Load embeddings into memory
 
 ## Usage
+
+### Ask Questions (RAG)
+
+The main way to interact with the assistant - ask natural language questions:
+
+```bash
+# Single question
+python main.py ask "Why was bet B0004 rejected?"
+python main.py ask "Which customers were most impacted by LATENCY_SPIKE?"
+python main.py ask "Find the top 5 highest price_delay_ms bets and summarize"
+python main.py ask "For customer C068, summarize their bets and any incidents"
+
+# Show the retrieved context used
+python main.py ask "Why was B0004 rejected?" --show-context
+
+# Interactive chat session
+python main.py chat
+```
 
 ### Search (Natural Language)
 
@@ -225,6 +261,21 @@ pytest tests/ -v
 
 ## Design Decisions & Tradeoffs
 
+### RAG System Design
+
+**Prompt Engineering**:
+The system prompt instructs the LLM to:
+- Only use information from provided bet records
+- Always cite bet_ids that support the answer
+- Explicitly state when evidence is insufficient
+- Focus on operational insights
+
+**Citation Extraction**:
+Citations are validated against retrieved bets to prevent hallucinated bet IDs.
+
+**Context Formatting**:
+Each bet is formatted with all fields clearly labeled, plus summary statistics when multiple bets are retrieved (status breakdown, incident counts, delay ranges).
+
 ### Why Hybrid (Structured + Embeddings)?
 
 1. **Exact queries are common**: Ops teams often query by bet_id or customer_id
@@ -245,8 +296,13 @@ Each bet is converted to a natural language document for embedding:
 
 ```
 Bet B0004: Customer C060 placed a £30 BTTS bet on West Ham vs Fullham (football). 
-Selection: No. Status: REJECTED. Incident: MARKET_SUSPENDED. Latency: 635ms.
+Selection: No. Status: REJECTED. Incident: MARKET_SUSPENDED. High latency: 635ms.
 ```
+
+**Important**: The document text is stored in the database alongside the embedding. When retrieving bets for RAG:
+- The stored embedding is used for similarity search (no re-embedding)
+- The stored document text is returned (no re-generation)
+- This ensures the text sent to the LLM exactly matches what was embedded
 
 This allows semantic search to match concepts like "rejected bets" or "high latency incidents".
 

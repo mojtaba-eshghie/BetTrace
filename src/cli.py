@@ -403,10 +403,17 @@ def ask(question: str, top_k: int, db: Optional[str], show_context: bool):
             response = assistant.ask(question, top_k=top_k)
         
         # Show retrieved context if requested
-        if show_context and response.retrieved_bets:
-            console.print("[bold]Retrieved Context:[/bold]")
-            _display_bets_compact(response.retrieved_bets)
-            console.print()
+        if show_context:
+            # Show SQL-computed statistics first
+            if response.stats_context:
+                console.print("[bold cyan]SQL Statistics (authoritative):[/bold cyan]")
+                console.print(response.stats_context)
+            
+            # Show the bet records table
+            if response.retrieved_bets:
+                console.print(f"[bold]Retrieved Bets ({len(response.retrieved_bets)} shown):[/bold]")
+                _display_bets_compact(response.retrieved_bets)
+                console.print()
         
         # Display the answer
         console.print(Panel(

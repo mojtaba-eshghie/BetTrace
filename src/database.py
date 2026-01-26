@@ -507,6 +507,222 @@ class Database:
             stored_document=row["document"]  # Include the stored document text
         )
     
+    def get_customer_stats(self, customer_id: str) -> Optional[Dict[str, Any]]:
+        """Get complete aggregated statistics for a customer via SQL."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    customer_id,
+                    COUNT(*) as total_bets,
+                    SUM(stake_gbp) as total_stake,
+                    AVG(stake_gbp) as avg_stake,
+                    AVG(price_delay_ms) as avg_delay,
+                    MIN(price_delay_ms) as min_delay,
+                    MAX(price_delay_ms) as max_delay
+                FROM bets 
+                WHERE customer_id = ?
+                GROUP BY customer_id
+            """, (customer_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            
+            # Get status breakdown
+            cursor.execute("""
+                SELECT status, COUNT(*) as count 
+                FROM bets WHERE customer_id = ? 
+                GROUP BY status
+            """, (customer_id,))
+            status_breakdown = {r["status"]: r["count"] for r in cursor.fetchall()}
+            
+            # Get incident breakdown
+            cursor.execute("""
+                SELECT incident_tag, COUNT(*) as count 
+                FROM bets WHERE customer_id = ? 
+                GROUP BY incident_tag
+            """, (customer_id,))
+            incident_breakdown = {r["incident_tag"]: r["count"] for r in cursor.fetchall()}
+            
+            # Get sport breakdown
+            cursor.execute("""
+                SELECT sport, COUNT(*) as count 
+                FROM bets WHERE customer_id = ? 
+                GROUP BY sport
+            """, (customer_id,))
+            sport_breakdown = {r["sport"]: r["count"] for r in cursor.fetchall()}
+            
+            return {
+                "customer_id": row["customer_id"],
+                "total_bets": row["total_bets"],
+                "total_stake": row["total_stake"],
+                "avg_stake": row["avg_stake"],
+                "avg_delay": row["avg_delay"],
+                "min_delay": row["min_delay"],
+                "max_delay": row["max_delay"],
+                "status_breakdown": status_breakdown,
+                "incident_breakdown": incident_breakdown,
+                "sport_breakdown": sport_breakdown
+            }
+    
+    def get_incident_stats(self, incident_tag: str) -> Optional[Dict[str, Any]]:
+        """Get complete aggregated statistics for an incident type via SQL."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    incident_tag,
+                    COUNT(*) as total_bets,
+                    COUNT(DISTINCT customer_id) as unique_customers,
+                    SUM(stake_gbp) as total_stake,
+                    AVG(stake_gbp) as avg_stake,
+                    AVG(price_delay_ms) as avg_delay,
+                    MIN(price_delay_ms) as min_delay,
+                    MAX(price_delay_ms) as max_delay
+                FROM bets 
+                WHERE incident_tag = ?
+                GROUP BY incident_tag
+            """, (incident_tag,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            
+            # Get status breakdown
+            cursor.execute("""
+                SELECT status, COUNT(*) as count 
+                FROM bets WHERE incident_tag = ? 
+                GROUP BY status
+            """, (incident_tag,))
+            status_breakdown = {r["status"]: r["count"] for r in cursor.fetchall()}
+            
+            # Get customers ranked by impact (number of affected bets, then total delay)
+            cursor.execute("""
+                SELECT 
+                    customer_id, 
+                    COUNT(*) as bet_count,
+                    SUM(price_delay_ms) as total_delay,
+                    MAX(price_delay_ms) as max_delay
+                FROM bets 
+                WHERE incident_tag = ?
+                GROUP BY customer_id
+                ORDER BY bet_count DESC, total_delay DESC
+            """, (incident_tag,))
+            customers_affected = [
+                {
+                    "customer_id": r["customer_id"],
+                    "bet_count": r["bet_count"],
+                    "total_delay": r["total_delay"],
+                    "max_delay": r["max_delay"]
+                }
+                for r in cursor.fetchall()
+            ]
+            
+            return {
+                "incident_tag": row["incident_tag"],
+                "total_bets": row["total_bets"],
+                "unique_customers": row["unique_customers"],
+                "total_stake": row["total_stake"],
+                "avg_stake": row["avg_stake"],
+                "avg_delay": row["avg_delay"],
+                "min_delay": row["min_delay"],
+                "max_delay": row["max_delay"],
+                "status_breakdown": status_breakdown,
+                "customers_affected": customers_affected
+            }
+    
+    def get_status_stats(self, status: str) -> Optional[Dict[str, Any]]:
+        """Get complete aggregated statistics for a status via SQL."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    status,
+                    COUNT(*) as total_bets,
+                    COUNT(DISTINCT customer_id) as unique_customers,
+                    SUM(stake_gbp) as total_stake,
+                    AVG(stake_gbp) as avg_stake,
+                    AVG(price_delay_ms) as avg_delay
+                FROM bets 
+                WHERE status = ?
+                GROUP BY status
+            """, (status,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            
+            # Get incident breakdown for this status
+            cursor.execute("""
+                SELECT incident_tag, COUNT(*) as count 
+                FROM bets WHERE status = ? 
+                GROUP BY incident_tag
+            """, (status,))
+            incident_breakdown = {r["incident_tag"]: r["count"] for r in cursor.fetchall()}
+            
+            return {
+                "status": row["status"],
+                "total_bets": row["total_bets"],
+                "unique_customers": row["unique_customers"],
+                "total_stake": row["total_stake"],
+                "avg_stake": row["avg_stake"],
+                "avg_delay": row["avg_delay"],
+                "incident_breakdown": incident_breakdown
+            }
+    
+    def get_top_delay_stats(self, limit: int = 10) -> Dict[str, Any]:
+        """Get statistics for top N highest delay bets via SQL."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get aggregate stats for top N
+            cursor.execute(f"""
+                SELECT 
+                    COUNT(*) as count,
+                    SUM(stake_gbp) as total_stake,
+                    AVG(price_delay_ms) as avg_delay,
+                    MIN(price_delay_ms) as min_delay,
+                    MAX(price_delay_ms) as max_delay
+                FROM (
+                    SELECT * FROM bets 
+                    ORDER BY price_delay_ms DESC 
+                    LIMIT ?
+                )
+            """, (limit,))
+            row = cursor.fetchone()
+            
+            # Get incident breakdown for top N
+            cursor.execute(f"""
+                SELECT incident_tag, COUNT(*) as count 
+                FROM (
+                    SELECT * FROM bets 
+                    ORDER BY price_delay_ms DESC 
+                    LIMIT ?
+                )
+                GROUP BY incident_tag
+            """, (limit,))
+            incident_breakdown = {r["incident_tag"]: r["count"] for r in cursor.fetchall()}
+            
+            # Get status breakdown for top N
+            cursor.execute(f"""
+                SELECT status, COUNT(*) as count 
+                FROM (
+                    SELECT * FROM bets 
+                    ORDER BY price_delay_ms DESC 
+                    LIMIT ?
+                )
+                GROUP BY status
+            """, (limit,))
+            status_breakdown = {r["status"]: r["count"] for r in cursor.fetchall()}
+            
+            return {
+                "limit": limit,
+                "total_stake": row["total_stake"],
+                "avg_delay": row["avg_delay"],
+                "min_delay": row["min_delay"],
+                "max_delay": row["max_delay"],
+                "incident_breakdown": incident_breakdown,
+                "status_breakdown": status_breakdown
+            }
+
     def text_search(self, query: str, limit: int = 10) -> List[Bet]:
         """
         Simple text search across event_name, market, and selection.

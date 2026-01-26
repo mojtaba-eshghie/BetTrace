@@ -18,8 +18,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 # OpenAI Configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-# LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5-nano")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5-mini-2025-08-07")
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-5-nano")
 
 # Embedding dimensions for text-embedding-3-small
 EMBEDDING_DIMENSIONS = 1536
