@@ -150,19 +150,26 @@ class RAGAssistant:
         """
         query_lower = query.lower()
         
-        # Check for specific bet ID - return exact match
-        bet_id_match = self.retriever._extract_bet_id(query)
-        if bet_id_match:
-            result = self.retriever.get_bet(bet_id_match)
-            if result:
-                return [result], 1
-            return [], 0
+        # Check for MULTIPLE bet IDs - return all matches
+        all_bet_ids = self.retriever._extract_all_bet_ids(query)
+        if all_bet_ids:
+            results = []
+            for bid in all_bet_ids:
+                result = self.retriever.get_bet(bid)
+                if result:
+                    results.append(result)
+            if results:
+                return results, len(results)
         
-        # Check for customer ID - return ALL customer bets (no truncation)
-        customer_id_match = self.retriever._extract_customer_id(query)
-        if customer_id_match:
-            results = self.retriever.get_customer_bets(customer_id_match)
-            return results, len(results)  # Return all for customer queries
+        # Check for MULTIPLE customer IDs - return all their bets
+        all_customer_ids = self.retriever._extract_all_customer_ids(query)
+        if all_customer_ids:
+            results = []
+            for cid in all_customer_ids:
+                customer_results = self.retriever.get_customer_bets(cid)
+                results.extend(customer_results)
+            if results:
+                return results, len(results)
         
         # Check for incident tag - return ALL matching bets
         incident_match = self.retriever._extract_incident_tag(query)

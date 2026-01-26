@@ -217,3 +217,39 @@ Evidence: B0023, B0032, B0036, B0038, B0059, B0072, B0090
 Retrieved 7 bet(s) for context
 (.venv) mojtabae@pool4-36-234 fdjtask % 
 ```
+
+
+
+```sh
+(.venv) mojtabae@pool4-36-234 fdjtask % python main.py ask "Compare bets B0001 and B0002" --show-context
+
+Question: Compare bets B0001 and B0002
+
+Retrieved Bets (2 shown):
+┏━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Bet ID ┃ Customer ┃ Event                ┃ Status  ┃ Incident      ┃ Delay ┃
+┡━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ B0001  │ C029     │ PSG vs Marsielle     │ SETTLED │ NONE          │ 214ms │
+│ B0002  │ C140     │ Rybakina vs Sabalnka │ SETTLED │ MANUAL_REVIEW │ 578ms │
+└────────┴──────────┴──────────────────────┴─────────┴───────────────┴───────┘
+
+╭─────────────────────────────────────────────────────────────────────────────────────────────── Answer ───────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Direct answer: Both bets were settled, but they differ by sport, market, stake, customer, incident tag, and latency. Evidence: [B0001, B0002]                                                        │
+│                                                                                                                                                                                                      │
+│ Relevant details:                                                                                                                                                                                    │
+│ - B0001: Customer C029, football (PSG vs Marsielle), Market BTTS, Selection Yes, Stake £10.0, Status SETTLED, Incident NONE, Price Delay 214ms. Evidence: [B0001]                                    │
+│ - B0002: Customer C140, tennis (Rybakina vs Sabalnka), Market Set 1 Winner, Selection Sabalnka, Stake £5.0, Status SETTLED, Incident MANUAL_REVIEW, Price Delay 578ms. Evidence: [B0002]             │
+│                                                                                                                                                                                                      │
+│ Operational notes:                                                                                                                                                                                   │
+│ - Both bets reached final status (SETTLED) per the records [B0001, B0002].                                                                                                                           │
+│ - Incident comparison: B0001 had no incident (NONE) while B0002 was flagged MANUAL_REVIEW, indicating it was subject to review during processing [B0002].                                            │
+│ - Latency comparison: B0001’s price delay (214ms) is very close to normal (~200ms) [B0001]; B0002’s delay (578ms) is elevated relative to normal and may have contributed to the manual review       │
+│ consideration [B0002].                                                                                                                                                                               │
+│                                                                                                                                                                                                      │
+│ Evidence: [B0001, B0002]                                                                                                                                                                             │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0001, B0002
+Retrieved 2 bet(s) for context
+(.venv) mojtabae@pool4-36-234 fdjtask % 
+```

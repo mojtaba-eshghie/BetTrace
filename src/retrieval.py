@@ -425,39 +425,53 @@ class Retriever:
         return customer_id
     
     def _extract_bet_id(self, text: str) -> Optional[str]:
-        """Extract bet ID from text."""
-        # Match patterns like B0042, B042, B42, bet B0042, bet 42
-        pattern = r'\b[Bb]?0*(\d{1,4})\b'
+        """Extract first bet ID from text (for backwards compatibility)."""
+        all_ids = self._extract_all_bet_ids(text)
+        return all_ids[0] if all_ids else None
+    
+    def _extract_all_bet_ids(self, text: str) -> List[str]:
+        """Extract ALL bet IDs from text."""
+        bet_ids = []
         
-        # First try explicit bet ID pattern
-        explicit_pattern = r'\b[Bb](\d{1,4})\b'
-        match = re.search(explicit_pattern, text)
-        if match:
-            return f"B{match.group(1).zfill(4)}"
+        # Find all explicit bet ID patterns (B0042, B042, B42)
+        explicit_matches = re.findall(r'\b[Bb](\d{1,4})\b', text)
+        for match in explicit_matches:
+            bet_ids.append(f"B{match.zfill(4)}")
         
-        # Check if "bet" keyword is present with a number
+        # Also check for "bet X" patterns without B prefix
         if "bet" in text.lower():
-            number_match = re.search(r'bet\s+(\d{1,4})', text.lower())
-            if number_match:
-                return f"B{number_match.group(1).zfill(4)}"
+            # Find "bet 42" or "bets 1, 2, 3" patterns
+            bet_number_matches = re.findall(r'bets?\s+(\d{1,4})', text.lower())
+            for match in bet_number_matches:
+                bid = f"B{match.zfill(4)}"
+                if bid not in bet_ids:
+                    bet_ids.append(bid)
         
-        return None
+        return bet_ids
     
     def _extract_customer_id(self, text: str) -> Optional[str]:
-        """Extract customer ID from text."""
-        # Match patterns like C029, C29, customer C029, customer 29
-        pattern = r'\b[Cc](\d{1,3})\b'
-        match = re.search(pattern, text)
-        if match:
-            return f"C{match.group(1).zfill(3)}"
+        """Extract first customer ID from text (for backwards compatibility)."""
+        all_ids = self._extract_all_customer_ids(text)
+        return all_ids[0] if all_ids else None
+    
+    def _extract_all_customer_ids(self, text: str) -> List[str]:
+        """Extract ALL customer IDs from text."""
+        customer_ids = []
         
-        # Check if "customer" keyword is present with a number
+        # Find all explicit customer ID patterns (C029, C29)
+        explicit_matches = re.findall(r'\b[Cc](\d{1,3})\b', text)
+        for match in explicit_matches:
+            customer_ids.append(f"C{match.zfill(3)}")
+        
+        # Also check for "customer X" patterns without C prefix
         if "customer" in text.lower():
-            number_match = re.search(r'customer\s+(\d{1,3})', text.lower())
-            if number_match:
-                return f"C{number_match.group(1).zfill(3)}"
+            customer_number_matches = re.findall(r'customers?\s+(\d{1,3})', text.lower())
+            for match in customer_number_matches:
+                cid = f"C{match.zfill(3)}"
+                if cid not in customer_ids:
+                    customer_ids.append(cid)
         
-        return None
+        return customer_ids
     
     def _extract_incident_tag(self, text: str) -> Optional[str]:
         """Extract incident tag from text."""
