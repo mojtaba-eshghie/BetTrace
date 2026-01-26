@@ -4,6 +4,9 @@ python-dotenv>=1.0.0
 pandas>=2.0.0
 numpy>=1.24.0
 
+# Vector search (optional but recommended for scalability)
+faiss-cpu>=1.7.0
+
 # Database (sqlite3 is built-in)
 
 # CLI
