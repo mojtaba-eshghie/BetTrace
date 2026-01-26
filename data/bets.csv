@@ -1,0 +1,101 @@
+bet_id,customer_id,sport,event_name,market,selection,stake_gbp,status,incident_tag,price_delay_ms
+B0001,C029,football,PSG vs Marsielle,BTTS,Yes,10,SETTLED,NONE,214
+B0002,C140,tennis,Rybakina vs Sabalnka,Set 1 Winner,Sabalnka,5,SETTLED,MANUAL_REVIEW,578
+B0003,C068,football,PSG vs Marsielle,Asian Handicap,Home -0.5,40,SETTLED,NONE,290
+B0004,C060,football,West Ham vs Fullham,BTTS,No,30,REJECTED,MARKET_SUSPENDED,635
+B0005,C098,tennis,Rybakina vs Sabalnka,Total Games O/U 21.5,Under 21.5,5,SETTLED,NONE,46
+B0006,C128,tennis,Murray vs Hurkacz,Match Winner,Hurkacz,50,SETTLED,MANUAL_REVIEW,198
+B0007,C040,basketball,Warriros vs Suns,Total Points O/U 215.5,Under 215.5,40,REJECTED,MARKET_SUSPENDED,146
+B0008,C069,basketball,Bucks vs 76ers,Moneyline,76ers,50,SETTLED,NONE,80
+B0009,C051,football,Brighton vs Wolvees,Over/Under 2.5,Over 2.5,50,SETTLED,NONE,99
+B0010,C018,basketball,Clippers vs Thunderr,Moneyline,Clippers,15,SETTLED,NONE,159
+B0011,C096,tennis,Murray vs Hurkacz,Match Winner,Murray,30,SETTLED,NONE,179
+B0012,C019,basketball,Warriros vs Suns,Spread,Away +3.5,30,SETTLED,NONE,94
+B0013,C014,basketball,Bulls vs Rapters,Total Points O/U 215.5,Over 215.5,30,SETTLED,NONE,87
+B0014,C026,football,Atletico Madird vs Valenica,Match Winner,Atletico Madird,20,SETTLED,NONE,191
+B0015,C117,tennis,Raducanu vs Pegulla,Total Games O/U 21.5,Under 21.5,25,SETTLED,NONE,76
+B0016,C015,basketball,Lakkers vs Celtcs,Moneyline,Lakkers,20,SETTLED,NONE,253
+B0017,C067,football,Atletico Madird vs Valenica,BTTS,Yes,15,PENDING,NONE,202
+B0018,C068,football,Brighton vs Wolvees,Match Winner,Brighton,15,SETTLED,NONE,222
+B0019,C068,football,Man Citeh vs Brantford,Over/Under 2.5,Under 2.5,20,SETTLED,NONE,121
+B0020,C071,football,Chealsea vs Arsenel,BTTS,Yes,25,SETTLED,NONE,248
+B0021,C095,basketball,Heat vs Knickss,Moneyline,Knickss,25,SETTLED,NONE,102
+B0022,C105,basketball,Bulls vs Rapters,Moneyline,Bulls,15,REJECTED,MARKET_SUSPENDED,839
+B0023,C069,football,Bayern Munchen vs Dortmundd,Match Winner,Draw,50,PENDING,LATENCY_SPIKE,1619
+B0024,C103,tennis,Medvedev vs Runee,Match Winner,Runee,40,PENDING,NONE,177
+B0025,C081,tennis,Swiatekk vs Gauf,Set 1 Winner,Swiatekk,40,VOID,NONE,237
+B0026,C032,basketball,Bucks vs 76ers,Total Points O/U 215.5,Under 215.5,30,SETTLED,NONE,186
+B0027,C104,basketball,Clippers vs Thunderr,Moneyline,Thunderr,80,SETTLED,NONE,204
+B0028,C022,tennis,Zverev vs Tsitsipas,Match Winner,Zverev,20,VOID,FEED_OUTAGE,495
+B0029,C127,tennis,Rybakina vs Sabalnka,Match Winner,Rybakina,10,SETTLED,NONE,203
+B0030,C136,basketball,Heat vs Knickss,Spread,Away +3.5,40,SETTLED,NONE,186
+B0031,C062,tennis,Murray vs Hurkacz,Match Winner,Hurkacz,30,SETTLED,NONE,157
+B0032,C120,tennis,Nadall vs Sinnner,Match Winner,Sinnner,10,PENDING,LATENCY_SPIKE,2466
+B0033,C057,tennis,Rybakina vs Sabalnka,Set 1 Winner,Sabalnka,40,SETTLED,NONE,163
+B0034,C007,football,Atletico Madird vs Valenica,Asian Handicap,Home -0.5,15,SETTLED,NONE,156
+B0035,C021,tennis,Nadall vs Sinnner,Total Games O/U 21.5,Over 21.5,30,SETTLED,NONE,208
+B0036,C122,basketball,Lakkers vs Celtcs,Total Points O/U 215.5,Over 215.5,25,PENDING,LATENCY_SPIKE,2431
+B0037,C097,tennis,Rybakina vs Sabalnka,Match Winner,Rybakina,50,SETTLED,NONE,178
+B0038,C004,tennis,Murray vs Hurkacz,Match Winner,Hurkacz,50,SETTLED,LATENCY_SPIKE,2026
+B0039,C069,tennis,Rybakina vs Sabalnka,Match Winner,Sabalnka,20,SETTLED,NONE,98
+B0040,C072,basketball,Bulls vs Rapters,Spread,Home -3.5,20,SETTLED,NONE,235
+B0041,C063,tennis,Zverev vs Tsitsipas,Set 1 Winner,Tsitsipas,30,SETTLED,NONE,81
+B0042,C048,football,Man Utd vs Newcatle,Asian Handicap,Away +0.5,25,SETTLED,NONE,110
+B0043,C033,basketball,Clippers vs Thunderr,Spread,Home -3.5,25,REJECTED,MARKET_SUSPENDED,374
+B0044,C014,football,Liverpol vs Spurs,BTTS,Yes,10,SETTLED,NONE,213
+B0045,C079,basketball,Heat vs Knickss,Moneyline,Heat,20,SETTLED,NONE,125
+B0046,C009,football,Aston Villla vs Evertoon,BTTS,No,20,SETTLED,NONE,93
+B0047,C043,tennis,Medvedev vs Runee,Set 1 Winner,Medvedev,25,SETTLED,NONE,67
+B0048,C006,basketball,Clippers vs Thunderr,Spread,Home -3.5,15,SETTLED,MANUAL_REVIEW,467
+B0049,C027,football,Brighton vs Wolvees,Asian Handicap,Away +0.5,40,SETTLED,NONE,216
+B0050,C106,football,Man Utd vs Newcatle,BTTS,No,5,VOID,FEED_OUTAGE,1073
+B0051,C041,tennis,Nadall vs Sinnner,Total Games O/U 21.5,Under 21.5,10,SETTLED,NONE,200
+B0052,C063,tennis,Djokvich vs Alcaraz,Set 1 Winner,Djokvich,15,REJECTED,MARKET_SUSPENDED,618
+B0053,C126,football,Nottm Forst vs Burnley,Asian Handicap,Away +0.5,40,SETTLED,NONE,235
+B0054,C098,tennis,Djokvich vs Alcaraz,Set 1 Winner,Djokvich,30,SETTLED,NONE,247
+B0055,C068,tennis,Raducanu vs Pegulla,Total Games O/U 21.5,Over 21.5,40,SETTLED,NONE,312
+B0056,C059,basketball,Lakkers vs Celtcs,Spread,Home -3.5,10,SETTLED,NONE,117
+B0057,C106,basketball,Bulls vs Rapters,Moneyline,Bulls,80,SETTLED,NONE,203
+B0058,C120,tennis,Djokvich vs Alcaraz,Match Winner,Alcaraz,25,PENDING,MANUAL_REVIEW,351
+B0059,C076,football,Juvetus vs Interr,Asian Handicap,Away +0.5,10,SETTLED,LATENCY_SPIKE,4648
+B0060,C036,basketball,Lakkers vs Celtcs,Total Points O/U 215.5,Over 215.5,50,SETTLED,NONE,105
+B0061,C094,basketball,Heat vs Knickss,Spread,Home -3.5,50,SETTLED,MANUAL_REVIEW,457
+B0062,C102,basketball,Bucks vs 76ers,Moneyline,76ers,10,SETTLED,NONE,120
+B0063,C084,basketball,Warriros vs Suns,Total Points O/U 215.5,Over 215.5,50,SETTLED,NONE,239
+B0064,C095,basketball,Bulls vs Rapters,Total Points O/U 215.5,Under 215.5,15,SETTLED,NONE,192
+B0065,C026,basketball,Bucks vs 76ers,Total Points O/U 215.5,Under 215.5,25,SETTLED,NONE,190
+B0066,C033,basketball,Warriros vs Suns,Moneyline,Warriros,20,VOID,FEED_OUTAGE,1078
+B0067,C034,football,Brighton vs Wolvees,Over/Under 2.5,Under 2.5,25,SETTLED,NONE,253
+B0068,C057,basketball,Lakkers vs Celtcs,Total Points O/U 215.5,Under 215.5,5,SETTLED,NONE,216
+B0069,C071,basketball,Bulls vs Rapters,Total Points O/U 215.5,Under 215.5,25,SETTLED,NONE,449
+B0070,C059,tennis,Zverev vs Tsitsipas,Set 1 Winner,Tsitsipas,10,SETTLED,NONE,246
+B0071,C096,football,Leeds vs Sheff Utd,Match Winner,Sheff Utd,30,REJECTED,MARKET_SUSPENDED,689
+B0072,C055,football,Atletico Madird vs Valenica,Asian Handicap,Home -0.5,30,SETTLED,LATENCY_SPIKE,2273
+B0073,C007,basketball,Bulls vs Rapters,Total Points O/U 215.5,Under 215.5,25,SETTLED,NONE,228
+B0074,C024,basketball,Heat vs Knickss,Moneyline,Knickss,30,SETTLED,NONE,256
+B0075,C070,tennis,Raducanu vs Pegulla,Set 1 Winner,Pegulla,20,SETTLED,NONE,129
+B0076,C015,football,Man Utd vs Newcatle,BTTS,Yes,25,SETTLED,NONE,195
+B0077,C091,football,West Ham vs Fullham,Match Winner,Draw,10,SETTLED,NONE,330
+B0078,C093,football,West Ham vs Fullham,Match Winner,West Ham,40,SETTLED,NONE,193
+B0079,C090,tennis,Djokvich vs Alcaraz,Match Winner,Djokvich,20,SETTLED,MANUAL_REVIEW,231
+B0080,C083,basketball,Bucks vs 76ers,Moneyline,76ers,50,SETTLED,NONE,240
+B0081,C024,basketball,Heat vs Knickss,Total Points O/U 215.5,Under 215.5,5,SETTLED,NONE,146
+B0082,C088,basketball,Lakkers vs Celtcs,Total Points O/U 215.5,Over 215.5,50,REJECTED,MARKET_SUSPENDED,601
+B0083,C014,basketball,Bulls vs Rapters,Spread,Home -3.5,40,SETTLED,NONE,252
+B0084,C101,football,Real Madird vs Barselona,Match Winner,Draw,30,SETTLED,NONE,268
+B0085,C055,tennis,Murray vs Hurkacz,Match Winner,Murray,15,SETTLED,NONE,234
+B0086,C034,basketball,Mavs vs Nuggetts,Moneyline,Mavs,15,SETTLED,NONE,40
+B0087,C121,football,Brighton vs Wolvees,Asian Handicap,Away +0.5,40,SETTLED,NONE,92
+B0088,C027,basketball,Clippers vs Thunderr,Total Points O/U 215.5,Over 215.5,15,REJECTED,MARKET_SUSPENDED,389
+B0089,C102,basketball,Bucks vs 76ers,Moneyline,76ers,30,SETTLED,NONE,261
+B0090,C121,tennis,Nadall vs Sinnner,Match Winner,Nadall,15,SETTLED,LATENCY_SPIKE,2615
+B0091,C118,football,Man Citeh vs Brantford,Asian Handicap,Home -0.5,20,SETTLED,NONE,184
+B0092,C135,basketball,Heat vs Knickss,Total Points O/U 215.5,Over 215.5,50,SETTLED,NONE,226
+B0093,C086,football,Chealsea vs Arsenel,BTTS,No,15,PENDING,NONE,329
+B0094,C011,tennis,Medvedev vs Runee,Total Games O/U 21.5,Under 21.5,50,VOID,FEED_OUTAGE,1194
+B0095,C103,basketball,Mavs vs Nuggetts,Spread,Away +3.5,50,SETTLED,NONE,165
+B0096,C076,tennis,Swiatekk vs Gauf,Match Winner,Gauf,25,SETTLED,NONE,239
+B0097,C015,football,Atletico Madird vs Valenica,Asian Handicap,Away +0.5,15,SETTLED,NONE,242
+B0098,C009,basketball,Warriros vs Suns,Total Points O/U 215.5,Under 215.5,30,SETTLED,NONE,224
+B0099,C128,basketball,Mavs vs Nuggetts,Total Points O/U 215.5,Over 215.5,25,SETTLED,NONE,232
+B0100,C023,basketball,Clippers vs Thunderr,Spread,Away +3.5,25,SETTLED,NONE,188

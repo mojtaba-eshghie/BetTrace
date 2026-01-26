@@ -1,0 +1,202 @@
+"""
+Data ingestion module for the Sportsbook RAG Assistant.
+
+Handles:
+- Loading bet data from CSV files
+- Generating embeddings via OpenAI API
+- Storing data in the hybrid database
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from typing import List, Optional
+from openai import OpenAI
+
+from .config import (
+    CSV_PATH, 
+    OPENAI_API_KEY, 
+    EMBEDDING_MODEL,
+    EMBEDDING_DIMENSIONS,
+    validate_config
+)
+from .models import Bet
+from .database import Database
+
+
+class Ingestion:
+    """
+    Handles data ingestion from CSV files into the hybrid database.
+    """
+    
+    def __init__(self, db: Optional[Database] = None):
+        """Initialize the ingestion module."""
+        self.db = db or Database()
+        self._client: Optional[OpenAI] = None
+    
+    @property
+    def client(self) -> OpenAI:
+        """Lazy initialization of OpenAI client."""
+        if self._client is None:
+            validate_config()
+            self._client = OpenAI(api_key=OPENAI_API_KEY)
+        return self._client
+    
+    def load_csv(self, csv_path: Optional[Path] = None) -> List[Bet]:
+        """
+        Load bet data from a CSV file.
+        
+        Args:
+            csv_path: Path to the CSV file. Defaults to configured path.
+            
+        Returns:
+            List of Bet objects
+        """
+        path = csv_path or CSV_PATH
+        
+        if not path.exists():
+            raise FileNotFoundError(f"CSV file not found: {path}")
+        
+        df = pd.read_csv(path)
+        
+        # Validate required columns
+        required_columns = {
+            "bet_id", "customer_id", "sport", "event_name", "market",
+            "selection", "stake_gbp", "status", "incident_tag", "price_delay_ms"
+        }
+        missing = required_columns - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing required columns: {missing}")
+        
+        # Convert to Bet objects
+        bets = [Bet.from_dict(row.to_dict()) for _, row in df.iterrows()]
+        
+        print(f"✓ Loaded {len(bets)} bets from {path}")
+        return bets
+    
+    def generate_embeddings(
+        self, 
+        texts: List[str], 
+        batch_size: int = 100
+    ) -> np.ndarray:
+        """
+        Generate embeddings for a list of texts using OpenAI API.
+        
+        Args:
+            texts: List of text strings to embed
+            batch_size: Number of texts per API call
+            
+        Returns:
+            NumPy array of embeddings (shape: [len(texts), EMBEDDING_DIMENSIONS])
+        """
+        all_embeddings = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            
+            response = self.client.embeddings.create(
+                model=EMBEDDING_MODEL,
+                input=batch
+            )
+            
+            # Extract embeddings and maintain order
+            batch_embeddings = [
+                item.embedding for item in response.data
+            ]
+            all_embeddings.extend(batch_embeddings)
+            
+            print(f"  → Generated embeddings for {min(i + batch_size, len(texts))}/{len(texts)} documents")
+        
+        return np.array(all_embeddings, dtype=np.float32)
+    
+    def ingest(
+        self, 
+        csv_path: Optional[Path] = None,
+        generate_embeddings: bool = True,
+        clear_existing: bool = True
+    ) -> int:
+        """
+        Full ingestion pipeline: load CSV, generate embeddings, store in database.
+        
+        Args:
+            csv_path: Path to the CSV file
+            generate_embeddings: Whether to generate embeddings (requires API key)
+            clear_existing: Whether to clear existing data before ingesting
+            
+        Returns:
+            Number of bets ingested
+        """
+        print("\n" + "="*60)
+        print("SPORTSBOOK RAG - DATA INGESTION")
+        print("="*60)
+        
+        # Step 1: Load CSV
+        print("\n[1/3] Loading CSV data...")
+        bets = self.load_csv(csv_path)
+        
+        # Step 2: Clear existing data if requested
+        if clear_existing:
+            print("\n[2/3] Clearing existing database...")
+            self.db.clear()
+            print("✓ Database cleared")
+        
+        # Step 3: Generate embeddings
+        embeddings = None
+        if generate_embeddings:
+            print("\n[3/3] Generating embeddings...")
+            documents = [bet.to_document() for bet in bets]
+            embeddings = self.generate_embeddings(documents)
+            print(f"✓ Generated {len(embeddings)} embeddings (dim={embeddings.shape[1]})")
+        else:
+            print("\n[3/3] Skipping embedding generation")
+        
+        # Step 4: Store in database
+        print("\n[4/4] Storing in database...")
+        self.db.insert_bets_batch(bets, embeddings)
+        print(f"✓ Stored {len(bets)} bets in database")
+        
+        # Load embeddings into memory for fast search
+        if embeddings is not None:
+            self.db.load_embeddings_to_memory()
+            print("✓ Loaded embeddings into memory")
+        
+        print("\n" + "="*60)
+        print(f"INGESTION COMPLETE: {len(bets)} bets processed")
+        print("="*60 + "\n")
+        
+        return len(bets)
+    
+    def get_stats(self) -> dict:
+        """Get statistics about the ingested data."""
+        return {
+            "total_bets": self.db.get_bet_count(),
+            "by_status": self.db.count_by_status(),
+            "by_incident": self.db.count_by_incident(),
+            "by_sport": self.db.get_stats_by_sport(),
+            "unique_customers": len(self.db.get_unique_customers())
+        }
+
+
+def run_ingestion(
+    csv_path: Optional[str] = None,
+    db_path: Optional[str] = None,
+    skip_embeddings: bool = False
+) -> Database:
+    """
+    Convenience function to run the full ingestion pipeline.
+    
+    Args:
+        csv_path: Path to CSV file (uses default if None)
+        db_path: Path to database file (uses default if None)
+        skip_embeddings: Set to True to skip embedding generation
+        
+    Returns:
+        Initialized Database instance
+    """
+    db = Database(Path(db_path) if db_path else None)
+    ingestion = Ingestion(db)
+    ingestion.ingest(
+        csv_path=Path(csv_path) if csv_path else None,
+        generate_embeddings=not skip_embeddings
+    )
+    return db
