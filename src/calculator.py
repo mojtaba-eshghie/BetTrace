@@ -301,8 +301,9 @@ class SafeCalculator:
         """Get top/bottom N records by a column."""
         order = "DESC" if desc else "ASC"
         limit = request.limit or 5
+        # Include all commonly needed columns, not just the sorted column
         sql = f"""
-            SELECT bet_id, customer_id, {request.column}, status, incident_tag
+            SELECT bet_id, customer_id, stake_gbp, price_delay_ms, status, incident_tag
             FROM bets {where_clause}
             ORDER BY {request.column} {order}
             LIMIT {limit}
@@ -315,13 +316,11 @@ class SafeCalculator:
             
             results = []
             for row in rows:
-                value = row[request.column]
-                if request.column == "stake_gbp":
-                    value = Decimal(str(value)).quantize(Decimal("0.01"))
                 results.append({
                     "bet_id": row["bet_id"],
                     "customer_id": row["customer_id"],
-                    request.column: value,
+                    "stake_gbp": Decimal(str(row["stake_gbp"])).quantize(Decimal("0.01")),
+                    "price_delay_ms": row["price_delay_ms"],
                     "status": row["status"],
                     "incident_tag": row["incident_tag"]
                 })
@@ -434,6 +433,15 @@ class SafeCalculator:
         return self.execute(CalculationRequest(
             calc_type=CalculationType.TOP_N,
             column="price_delay_ms",
+            filters=filters if filters else None,
+            limit=n
+        ))
+    
+    def top_by_stake(self, n: int = 5, **filters) -> CalculationResult:
+        """Get top N bets by stake."""
+        return self.execute(CalculationRequest(
+            calc_type=CalculationType.TOP_N,
+            column="stake_gbp",
             filters=filters if filters else None,
             limit=n
         ))

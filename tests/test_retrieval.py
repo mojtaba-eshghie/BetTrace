@@ -329,7 +329,8 @@ class TestRAGFormatting:
             RetrievalResult(bet=sample_bets[1])
         ]
         
-        context = assistant._format_context(results, "test query", include_aggregations=True)
+        # Use the new method
+        context = assistant._format_bet_records(results, max_rows=10)
         
         # Check that bet IDs are present
         assert "B0001" in context
@@ -538,18 +539,26 @@ class TestCitationEnforcement:
     """Tests for citation enforcement in RAG responses."""
     
     def test_keeps_proper_evidence_line(self, test_db, sample_bets):
+        """Test that for small result sets, we cite ALL results regardless of what LLM wrote."""
         from src.rag import RAGAssistant
         from src.models import RetrievalResult
         
         assistant = RAGAssistant(test_db)
         
-        # Use sample_bets fixture
-        mock_results = [RetrievalResult(bet=sample_bets[0], match_type="test")]
+        # Use both sample bets
+        mock_results = [
+            RetrievalResult(bet=sample_bets[0], match_type="test"),
+            RetrievalResult(bet=sample_bets[1], match_type="test")
+        ]
         
-        answer = "There are 100 bets.\n\nEvidence: [B0001, B0002]"
-        result = assistant._enforce_citations(answer, ["B0001", "B0002"], mock_results)
+        # LLM only cited 1 bet, but we have 2 results
+        answer = "There are 2 bets.\n\nEvidence: [B0001]"
+        result = assistant._enforce_citations(answer, ["B0001"], mock_results)
         
-        assert result == answer  # Should be unchanged
+        # Should cite ALL results (B0001 and B0002) for small result sets
+        assert "B0001" in result
+        assert "B0002" in result
+        assert "Evidence:" in result
     
     def test_adds_evidence_when_missing(self, test_db, sample_bets):
         from src.rag import RAGAssistant
@@ -714,3 +723,158 @@ class TestIDNormalization:
         # B00001 should extract and normalize to B0001
         ids = retriever._extract_all_bet_ids("Show bet B00001")
         assert ids == ["B0001"]
+
+
+# =============================================================================
+# Query Parser Tests
+# =============================================================================
+
+class TestQueryParser:
+    """Tests for the unified query parser."""
+    
+    def test_parse_bet_id(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Standard bet ID
+        parsed = parser.parse("Show bet B0001")
+        assert parsed.bet_ids == ["B0001"]
+        assert parsed.query_type.value == "entity_lookup"
+    
+    def test_parse_customer_id(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Standard customer ID
+        parsed = parser.parse("Show customer C029 bets")
+        assert parsed.customer_ids == ["C029"]
+        assert parsed.query_type.value == "entity_lookup"
+    
+    def test_parse_top_n_stake(self):
+        from src.query_parser import get_query_parser, AggregationType
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Top 5 highest stake bets")
+        assert parsed.sort_by == "stake_gbp"
+        assert parsed.sort_order == "desc"
+        assert parsed.limit == 5
+        assert parsed.aggregation == AggregationType.TOP_N
+    
+    def test_parse_top_n_delay(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Highest delay tennis bets")
+        assert parsed.sort_by == "price_delay_ms"
+        assert parsed.filters.get("sport") == "tennis"
+    
+    def test_parse_aggregate_count(self):
+        from src.query_parser import get_query_parser, AggregationType
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("How many football bets?")
+        assert parsed.aggregation == AggregationType.COUNT
+        assert parsed.filters.get("sport") == "football"
+    
+    def test_parse_filter_status(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Show REJECTED bets")
+        assert parsed.filters.get("status") == "REJECTED"
+    
+    def test_parse_filter_incident(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Bets with LATENCY_SPIKE")
+        assert parsed.filters.get("incident_tag") == "LATENCY_SPIKE"
+    
+    def test_parse_invalid_customer_id(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Show customer F029 bets")
+        assert parsed.invalid_entity_reference is not None
+        assert "f029" in parsed.invalid_entity_reference
+    
+    def test_parse_invalid_bet_id(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Show bet X123")
+        assert parsed.invalid_entity_reference is not None
+        assert "x123" in parsed.invalid_entity_reference
+    
+    def test_parse_combined_filters(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Top 3 REJECTED tennis bets by delay")
+        assert parsed.filters.get("sport") == "tennis"
+        assert parsed.filters.get("status") == "REJECTED"
+        assert parsed.limit == 3
+
+    def test_parse_delay_filter(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("How many rejected bets had delay > 500ms")
+        assert parsed.filters.get("status") == "REJECTED"
+        assert parsed.filters.get("min_delay") == 500
+        # Should NOT have a stake filter
+        assert "min_stake" not in parsed.filters
+    
+    def test_parse_stake_filter_with_pound(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Bets with stake over £50")
+        assert parsed.filters.get("min_stake") == 50.0
+        assert "min_delay" not in parsed.filters
+
+    def test_parse_existence_query(self):
+        """Test 'are there any' style queries are parsed as count."""
+        from src.query_parser import get_query_parser, AggregationType
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Are there any rejected bets with delay < 500ms")
+        assert parsed.aggregation == AggregationType.COUNT
+        assert parsed.filters.get("status") == "REJECTED"
+        assert parsed.filters.get("max_delay") == 500
+
+    def test_parse_semantic_query_most_interesting(self):
+        """Test 'most interesting' is parsed as semantic, not top_n."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Which is the most interesting rejected bet?")
+        assert parsed.query_type.value == "hybrid" or parsed.query_type.value == "semantic"
+        assert "interesting" in parsed.semantic_terms
+        # Should NOT be aggregation top_n
+        assert parsed.aggregation.value != "top_n"
+    
+    def test_parse_no_false_all_bets_match(self):
+        """Test 'football bets' doesn't falsely match 'all bets'."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Most suspicious football bets")
+        # Should be hybrid (has semantic term) not aggregate
+        assert parsed.query_type.value == "hybrid"
+        assert "suspicious" in parsed.semantic_terms

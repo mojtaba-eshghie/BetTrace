@@ -560,6 +560,15 @@ class Retriever:
         ]
         text_lower = text.lower()
         return any(kw in text_lower for kw in latency_keywords)
+    
+    def _is_stake_query(self, text: str) -> bool:
+        """Check if query is about stake/amount."""
+        stake_keywords = [
+            "stake", "amount", "value", "money", "£", "gbp",
+            "wager", "wagered", "bet amount"
+        ]
+        text_lower = text.lower()
+        return any(kw in text_lower for kw in stake_keywords)
 
 
 def create_retriever(db: Optional[Database] = None) -> Retriever:

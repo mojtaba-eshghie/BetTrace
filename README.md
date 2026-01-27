@@ -4,9 +4,10 @@ A Retrieval-Augmented Generation (RAG) system for querying sports betting data u
 
 ## Overview
 
-This assistant helps ops teams query bet records using a hybrid retrieval approach that combines:
-- **Structured queries**: Exact lookups, filtering, and aggregations via SQLite
+This assistant helps ops teams query bet records using a **unified query pipeline** that combines:
+- **Structured queries**: Exact lookups, filtering, aggregations, and rankings via SQL
 - **Semantic search**: Embedding-based similarity search using OpenAI's text-embedding-3-small
+- **Hybrid search**: SQL filtering + semantic ranking for complex queries
 
 ## Architecture
 
@@ -18,46 +19,73 @@ This assistant helps ops teams query bet records using a hybrid retrieval approa
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                        RAG Layer                                │
+│                    Unified Query Pipeline                        │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │   Query     │  │  Context    │  │   LLM Generation        │ │
-│  │  Analysis   │→ │  Formatting │→ │   (GPT-5-nano)          │ │
+│  │   Query     │  │   Query     │  │   LLM Generation        │ │
+│  │   Parser    │→ │  Executor   │→ │   (GPT-5-mini)          │ │
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+│         ↓                ↓                                      │
+│   ParsedQuery      ExecutionResult                              │
+│   - bet_ids        - results                                    │
+│   - filters        - stats_context                              │
+│   - sort/limit     - execution_path                             │
+│   - aggregation                                                 │
 └─────────────────────────────────────────────────────────────────┘
+                               │
+        ┌──────────────────────┼──────────────────────┐
+        ▼                      ▼                      ▼
+┌───────────────┐    ┌─────────────────┐    ┌───────────────┐
+│  SQL Path     │    │  Semantic Path  │    │  Hybrid Path  │
+│  - Lookups    │    │  - Embeddings   │    │  SQL Filter + │
+│  - Filters    │    │  - Similarity   │    │  Semantic Rank│
+│  - Top N      │    │    Search       │    │               │
+│  - Aggregates │    │                 │    │               │
+└───────────────┘    └─────────────────┘    └───────────────┘
+        │                      │                      │
+        └──────────────────────┴──────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                      Retrieval Layer                            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │   Exact     │  │  Filtered   │  │  Semantic / Hybrid      │ │
-│  │   Lookup    │  │   Queries   │  │      Search             │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-             ┌─────────────────┼─────────────────┐
-             ▼                 ▼                 ▼
-┌──────────────────────┐ ┌───────────────┐ ┌──────────────────────┐
-│    Database Layer    │ │  Embedding    │ │   SafeCalculator     │
-│  ┌────────────────┐  │ │   Service     │ │   (SQL-based math)   │
-│  │SQLite + Vector │  │ │  (singleton)  │ │                      │
-│  │    Store       │  │ │  - Caching    │ │                      │
-│  └────────────────┘  │ │  - Retry      │ │                      │
-└──────────────────────┘ └───────────────┘ └──────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Ingestion Layer                             │
-│         CSV → Bet Objects → Documents → Embeddings              │
+│                    Infrastructure Layer                          │
+│  ┌───────────────┐  ┌───────────────┐  ┌───────────────────┐   │
+│  │ Database      │  │ Embedding     │  │ SafeCalculator    │   │
+│  │ (SQLite +     │  │ Service       │  │ (SQL-based math)  │   │
+│  │  VectorStore) │  │ (cached)      │  │                   │   │
+│  └───────────────┘  └───────────────┘  └───────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### RAG Workflow
+### Query Pipeline Workflow
 
-1. **Query Analysis**: Extract bet IDs, customer IDs, incidents, or keywords
-2. **Smart Retrieval**: Choose optimal retrieval strategy based on query type
-3. **Context Formatting**: Format retrieved bets as structured context for LLM
-4. **LLM Generation**: Generate grounded answer using GPT-5-nano with strict citation rules
-5. **Citation Extraction**: Parse and validate bet ID citations from response
+1. **Query Parser** (`query_parser.py`): Parses natural language into structured `ParsedQuery`
+   - Extracts bet IDs, customer IDs
+   - Identifies filters (sport, status, incident)
+   - Detects sorting (top/bottom, by column)
+   - Identifies aggregation type (count, sum, avg, top_n)
+   - Flags invalid entity references
+
+2. **Query Executor** (`query_executor.py`): Executes `ParsedQuery` using optimal strategy
+   - `ENTITY_LOOKUP`: Direct SQL lookup by ID
+   - `FILTERED`: SQL WHERE clause
+   - `AGGREGATE`: SQL aggregation functions
+   - `TOP_N`: SQL ORDER BY + LIMIT
+   - `SEMANTIC`: Embedding similarity search
+   - `HYBRID`: SQL filter + semantic ranking
+
+3. **LLM Generation**: Generates human-readable answer with citations
+
+### Supported Query Types
+
+| Query Example | Parsed As | Execution Path |
+|---------------|-----------|----------------|
+| "Show bet B0042" | entity_lookup | SQL lookup |
+| "Customer C029 bets" | entity_lookup | SQL lookup |
+| "Top 5 highest stake bets" | top_n | SQL ORDER BY stake DESC |
+| "Highest delay tennis bets" | top_n + filter | SQL WHERE sport='tennis' ORDER BY delay |
+| "How many football bets?" | aggregate + filter | SQL COUNT WHERE sport='football' |
+| "REJECTED bets" | filtered | SQL WHERE status='REJECTED' |
+| "Bets with pricing issues" | semantic | Embedding search |
+| "Suspicious tennis bets" | hybrid | SQL filter + semantic rank |
 
 ## Project Structure
 
@@ -68,6 +96,16 @@ sportsbook-rag/
 ├── README.md            # This file
 ├── main.py              # CLI entry point
 ├── src/
+│   ├── query_parser.py   # NEW: Unified query parsing
+│   ├── query_executor.py # NEW: Unified query execution
+│   ├── rag.py            # RAG orchestration (uses pipeline)
+│   ├── retrieval.py      # Low-level retrieval methods
+│   ├── database.py       # SQLite + VectorStore
+│   ├── calculator.py     # SQL-based calculations
+│   ├── embedding_service.py # Centralized embeddings (cached)
+│   ├── ingestion.py      # Data loading
+│   ├── models.py         # Data models
+│   └── config.py         # Configuration
 │   ├── __init__.py
 │   ├── config.py        # Configuration and settings
 │   ├── models.py        # Data models (Bet, RetrievalResult)

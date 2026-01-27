@@ -460,3 +460,131 @@ Retrieved 0 bet(s) for context
 
 ⚠ The answer may be incomplete due to insufficient evidence.
 ```
+
+
+
+```bash
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py ask "What are the last 3 bets for C068" --show-context
+
+Question: What are the last 3 bets for C068
+
+SQL Statistics (authoritative):
+============================================================
+COMPUTED FACTS (pre-calculated, DO NOT recalculate)
+============================================================
+Customer: C068
+
+• Total Bets: 4
+• Total Stake: £115.00
+• Average Stake: £28.75
+• Average Delay: 236ms
+• Maximum Delay: 312ms
+• Status Breakdown: {'SETTLED': 4}
+
+⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE
+============================================================
+Retrieved Bets (4 shown):
+┏━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
+┃ Bet ID ┃ Customer ┃ Event                  ┃ Status  ┃ Incident ┃ Delay ┃
+┡━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
+│ B0003  │ C068     │ PSG vs Marsielle       │ SETTLED │ NONE     │ 290ms │
+│ B0018  │ C068     │ Brighton vs Wolvees    │ SETTLED │ NONE     │ 222ms │
+│ B0019  │ C068     │ Man Citeh vs Brantford │ SETTLED │ NONE     │ 121ms │
+│ B0055  │ C068     │ Raducanu vs Pegulla    │ SETTLED │ NONE     │ 312ms │
+└────────┴──────────┴────────────────────────┴─────────┴──────────┴───────┘
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ Here are the last 3 bets for C068:                                                                                                                                │
+│                                                                                                                                                                   │
+│ - Bet ID B0055 — Sport: tennis; Event: Raducanu vs Pegulla; Market: Total Games O/U 21.5; Selection: Over 21.5; Stake: £40.00; Status: SETTLED; Incident: NONE;   │
+│ Price Delay: 312ms.                                                                                                                                               │
+│ - Bet ID B0019 — Sport: football; Event: Man Citeh vs Brantford; Market: Over/Under 2.5; Selection: Under 2.5; Stake: £20.00; Status: SETTLED; Incident: NONE;    │
+│ Price Delay: 121ms.                                                                                                                                               │
+│ - Bet ID B0018 — Sport: football; Event: Brighton vs Wolvees; Market: Match Winner; Selection: Brighton; Stake: £15.00; Status: SETTLED; Incident: NONE; Price    │
+│ Delay: 222ms.                                                                                                                                                     │
+│                                                                                                                                                                   │
+│ Evidence: [B0055, B0019, B0018]                                                                                                                                   │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0055, B0019, B0018
+Retrieved 4 bet(s) for context
+```
+
+
+```bash
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py search --method exact "B42"                
+
+Query: B42
+Method: exact
+
+Found 1 result(s)
+
+                                                           Retrieved Bets                                                            
+┏━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃ Bet ID ┃ Customer ┃ Sport    ┃ Event               ┃ Market         ┃ Selection ┃ Stake ┃ Status  ┃ Incident ┃ Delay (ms) ┃ Score ┃
+┡━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│ B0042  │ C048     │ football │ Man Utd vs Newcatle │ Asian Handicap │ Away +0.5 │   £25 │ SETTLED │ NONE     │        110 │ 1.000 │
+└────────┴──────────┴──────────┴─────────────────────┴────────────────┴───────────┴───────┴─────────┴──────────┴────────────┴───────┘
+
+Evidence: B0042
+```
+
+
+
+```bash
+
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py ask "Are there any rejected bets with delay < 500ms"
+
+Question: Are there any rejected bets with delay < 500ms
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ Yes — there are 3 rejected bets with delay < 500ms; total stake £80.00; average stake £26.67; unique customers 3; average delay 303ms. Evidence: [B0007, B0043,   │
+│ B0088]                                                                                                                                                            │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0007, B0043, B0088
+Retrieved 3 bet(s) for context
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py ask "Do we have any rejected bets with delay < 500ms"
+
+Question: Do we have any rejected bets with delay < 500ms
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ Yes — there are 3 rejected bets with delay < 500ms; total stake £80.00, average stake £26.67, unique customers 3, average delay 303ms. Evidence: [B0007, B0043,   │
+│ B0088]                                                                                                                                                            │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0007, B0043, B0088
+Retrieved 3 bet(s) for context
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py ask "All rejected bets with delay < 500ms"  
+
+Question: All rejected bets with delay < 500ms
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ Summary (computed): Total Bets: 3; Total Stake: £80.00; Average Stake: £26.67; Unique Customers: 3; Average Delay: 303ms.                                         │
+│                                                                                                                                                                   │
+│ B0007 — Customer C040; Sport: basketball; Event: Warriros vs Suns; Market: Total Points O/U 215.5; Selection: Under 215.5; Stake: £40.00; Status: REJECTED;       │
+│ Incident: MARKET_SUSPENDED; Price Delay: 146ms.                                                                                                                   │
+│ B0043 — Customer C033; Sport: basketball; Event: Clippers vs Thunderr; Market: Spread; Selection: Home -3.5; Stake: £25.00; Status: REJECTED; Incident:           │
+│ MARKET_SUSPENDED; Price Delay: 374ms.                                                                                                                             │
+│ B0088 — Customer C027; Sport: basketball; Event: Clippers vs Thunderr; Market: Total Points O/U 215.5; Selection: Over 215.5; Stake: £15.00; Status: REJECTED;    │
+│ Incident: MARKET_SUSPENDED; Price Delay: 389ms.                                                                                                                   │
+│                                                                                                                                                                   │
+│ Evidence: [B0007, B0043, B0088]                                                                                                                                   │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0007, B0043, B0088
+Retrieved 3 bet(s) for context
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py ask "Summarize all rejected bets with delay < 500ms"
+
+Question: Summarize all rejected bets with delay < 500ms
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ There are 3 rejected bets with delay < 500ms, total stake £80.00, average stake £26.67, unique customers 3, and average delay 303ms. Evidence: [B0007, B0043,     │
+│ B0088]                                                                                                                                                            │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0007, B0043, B0088
+Retrieved 3 bet(s) for context
+
+
+```
