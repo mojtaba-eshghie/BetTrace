@@ -302,6 +302,7 @@ The system uses a hybrid approach that scales from 100 to 100K+ rows:
 - SQL pre-filters bets (e.g., `sport='football'`)
 - FAISS searches only among filtered IDs
 - Avoids O(N) Python loop over all embeddings
+- Uses O(n+k) dict-based lookups, not O(n²) nested loops
 
 ```python
 # Old (O(N) Python loop):
@@ -312,6 +313,18 @@ for bet_id in all_bet_ids:
 # New (FAISS filtered search):
 vector_store.search(query, filter_ids=filtered_ids)  # O(log K) where K=filter size
 ```
+
+**Design Decision - No Weighted Scoring**:
+We explicitly removed the unused `semantic_weight` parameter. The current ranking is:
+1. **With embeddings**: Pure semantic similarity (cosine) ranking
+2. **Without embeddings**: Explicit fallback to `bet_id DESC` (most recent first)
+
+If weighted scoring is needed in the future (e.g., combining semantic score with recency):
+```python
+# Future implementation would look like:
+final_score = semantic_weight * semantic_score + (1 - semantic_weight) * recency_score
+```
+This requires defining what the "recency_score" or "sql_score" means for your use case.
 
 ### Document Representation
 

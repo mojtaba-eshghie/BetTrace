@@ -354,3 +354,51 @@ Evidence: B0001, B0002, B0003
 Retrieved 3 bet(s) for context
 (.venv) mojtabae@MBP2023A BetTrace % 
 ```
+
+
+
+```bash
+(.venv) mojtabae@MBP2023A BetTrace % python main.py ask "Show me REJECTED bets" --show-context
+
+Question: Show me REJECTED bets
+
+SQL Statistics (authoritative):
+============================================================
+COMPUTED FACTS (pre-calculated, DO NOT recalculate)
+============================================================
+Status: REJECTED
+
+• Total Bets: 8
+• Unique Customers: 8
+• Total Stake: £220.00
+• Average Stake: £27.50
+• Average Delay: 536ms
+• Incident Breakdown: {'MARKET_SUSPENDED': 8}
+
+⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE
+============================================================
+Retrieved Bets (8 shown):
+┏━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Bet ID ┃ Customer ┃ Event                ┃ Status   ┃ Incident         ┃ Delay ┃
+┡━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ B0004  │ C060     │ West Ham vs Fullham  │ REJECTED │ MARKET_SUSPENDED │ 635ms │
+│ B0007  │ C040     │ Warriros vs Suns     │ REJECTED │ MARKET_SUSPENDED │ 146ms │
+│ B0022  │ C105     │ Bulls vs Rapters     │ REJECTED │ MARKET_SUSPENDED │ 839ms │
+│ B0043  │ C033     │ Clippers vs Thunderr │ REJECTED │ MARKET_SUSPENDED │ 374ms │
+│ B0052  │ C063     │ Djokvich vs Alcaraz  │ REJECTED │ MARKET_SUSPENDED │ 618ms │
+│ B0071  │ C096     │ Leeds vs Sheff Utd   │ REJECTED │ MARKET_SUSPENDED │ 689ms │
+│ B0082  │ C088     │ Lakkers vs Celtcs    │ REJECTED │ MARKET_SUSPENDED │ 601ms │
+│ B0088  │ C027     │ Clippers vs Thunderr │ REJECTED │ MARKET_SUSPENDED │ 389ms │
+└────────┴──────────┴──────────────────────┴──────────┴──────────────────┴───────┘
+
+╭────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────╮
+│ There are 8 REJECTED bets (Unique Customers: 8; Total Stake: £220.00; Average Stake: £27.50; Average Delay: 536ms; Incident Breakdown:     │
+│ {'MARKET_SUSPENDED': 8}). Evidence: [B0004, B0007, B0022]                                                                                  │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0004, B0007, B0022
+Retrieved 8 bet(s) for context
+(.venv) mojtabae@MBP2023A BetTrace % 
+```
+
+
