@@ -539,18 +539,26 @@ class TestCitationEnforcement:
     """Tests for citation enforcement in RAG responses."""
     
     def test_keeps_proper_evidence_line(self, test_db, sample_bets):
+        """Test that for small result sets, we cite ALL results regardless of what LLM wrote."""
         from src.rag import RAGAssistant
         from src.models import RetrievalResult
         
         assistant = RAGAssistant(test_db)
         
-        # Use sample_bets fixture
-        mock_results = [RetrievalResult(bet=sample_bets[0], match_type="test")]
+        # Use both sample bets
+        mock_results = [
+            RetrievalResult(bet=sample_bets[0], match_type="test"),
+            RetrievalResult(bet=sample_bets[1], match_type="test")
+        ]
         
-        answer = "There are 100 bets.\n\nEvidence: [B0001, B0002]"
-        result = assistant._enforce_citations(answer, ["B0001", "B0002"], mock_results)
+        # LLM only cited 1 bet, but we have 2 results
+        answer = "There are 2 bets.\n\nEvidence: [B0001]"
+        result = assistant._enforce_citations(answer, ["B0001"], mock_results)
         
-        assert result == answer  # Should be unchanged
+        # Should cite ALL results (B0001 and B0002) for small result sets
+        assert "B0001" in result
+        assert "B0002" in result
+        assert "Evidence:" in result
     
     def test_adds_evidence_when_missing(self, test_db, sample_bets):
         from src.rag import RAGAssistant

@@ -321,14 +321,23 @@ Example bad answer: "Here are the bets: B0001 has £10..." (DO NOT DO THIS)"""
         extracted_citations: List[str],
         results: List[RetrievalResult]
     ) -> str:
-        """Ensure the answer includes citations."""
+        """Ensure the answer includes complete citations."""
         if not results:
             return answer
         
-        # Check if answer already has proper Evidence line
-        has_evidence = bool(re.search(r'Evidence:\s*\[?[^\]]+\]?', answer, re.IGNORECASE))
         result_ids = [r.bet.bet_id for r in results]
         
+        # Check if answer already has proper Evidence line
+        has_evidence = bool(re.search(r'Evidence:\s*\[?[^\]]+\]?', answer, re.IGNORECASE))
+        
+        # For small result sets (≤ 10), always cite ALL results, not just what LLM chose
+        # This ensures accuracy: if we say "5 bets" we should cite all 5
+        if len(result_ids) <= 10:
+            # Remove any existing Evidence line and append complete one
+            answer = re.sub(r'\n*Evidence:.*$', '', answer, flags=re.IGNORECASE | re.MULTILINE).strip()
+            return answer + f"\n\nEvidence: [{', '.join(result_ids)}]"
+        
+        # For larger result sets, use what LLM cited or first 5
         if extracted_citations and has_evidence:
             return answer
         
