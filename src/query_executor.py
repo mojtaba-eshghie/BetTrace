@@ -291,19 +291,80 @@ class QueryExecutor:
         )
     
     def _execute_semantic(self, parsed: ParsedQuery, top_k: int) -> ExecutionResult:
-        """Execute pure semantic search."""
+        """
+        Execute semantic search using team-level embeddings.
+        
+        Detects if query is looking for a team/player name and uses team-only
+        search for best results (no document embedding noise).
+        """
         query = parsed.original_query
         
-        # Use retriever for semantic search
-        results = self.retriever.semantic_search(query, top_k=top_k)
+        # Detect if this is a team/player name search
+        # Indicators: short meaningful terms, asking about specific team
+        team_search = self._is_team_search(parsed)
+        
+        try:
+            # Use lower threshold for team searches (want max recall)
+            threshold = 0.2 if team_search else None  # None = use default
+            
+            results = self.retriever.semantic_search(
+                query, 
+                top_k=top_k,
+                threshold=threshold,
+                use_dual_embeddings=True,
+                team_only=team_search  # Pure team search if detected
+            )
+        except Exception as e:
+            # Semantic search failed (no API key, etc.)
+            results = []
         
         return ExecutionResult(
             results=results,
             total_count=len(results),
-            stats_context=None,  # No stats for pure semantic
+            stats_context=None,
             parsed_query=parsed,
-            execution_path="semantic"
+            execution_path="semantic_team_only" if team_search else ("semantic_team" if results else "semantic_empty")
         )
+    
+    def _is_team_search(self, parsed: ParsedQuery) -> bool:
+        """
+        Detect if query is looking for a specific team/player name.
+        
+        Returns True if:
+        - Query has short, meaningful search terms (likely team/player names)
+        - Query uses patterns like "involving X", "X bets", "bets on X"
+        """
+        # Common filler words to ignore
+        filler_words = {
+            'all', 'bets', 'bet', 'involving', 'involves', 'with', 'for',
+            'on', 'the', 'a', 'an', 'that', 'which', 'find', 'show', 'get',
+            'list', 'event', 'events', 'team', 'teams', 'game', 'games',
+            'match', 'matches', 'player', 'players'
+        }
+        
+        # Extract meaningful terms from semantic_terms
+        meaningful = [
+            t.lower().rstrip('.?,!') 
+            for t in parsed.semantic_terms 
+            if t.lower().rstrip('.?,!') not in filler_words and len(t) >= 2
+        ]
+        
+        # If we have 1-3 short meaningful terms, likely a team/player search
+        if 1 <= len(meaningful) <= 3:
+            # Check if terms look like names (capitalized words, short words)
+            return True
+        
+        # Check for patterns in original query
+        query_lower = parsed.original_query.lower()
+        team_patterns = [
+            'involving ', 'bets on ', 'bets for ', 'games with ',
+            ' vs ', ' versus ', 'match against '
+        ]
+        for pattern in team_patterns:
+            if pattern in query_lower:
+                return True
+        
+        return False
     
     # ==========================================================================
     # Filter Building Helpers

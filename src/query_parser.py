@@ -103,13 +103,29 @@ class ParsedQuery:
         if self.bet_ids or self.customer_ids:
             return QueryType.ENTITY_LOOKUP
         
-        # Top N queries
+        # Top N queries with explicit sort criteria should ALWAYS be TOP_N
+        # Semantic terms here are for LLM analysis AFTER retrieval, not for routing
         if self.aggregation in (AggregationType.TOP_N, AggregationType.BOTTOM_N):
+            if self.sort_by:  # We have a concrete column to sort by
+                return QueryType.TOP_N
+            # No sort column but semantic terms - let hybrid figure it out
             if self.semantic_terms:
                 return QueryType.HYBRID
             return QueryType.TOP_N
         
-        # Pure aggregation (count, sum, avg)
+        # COUNT/SUM/AVG with FILTERS should go to AGGREGATE (filters are the search criteria)
+        # e.g., "How many VOID bets due to FEED_OUTAGE?" → use filters, not semantic search
+        if self.aggregation not in (AggregationType.NONE, AggregationType.TOP_N, AggregationType.BOTTOM_N):
+            if self.filters:
+                return QueryType.AGGREGATE
+        
+        # COUNT aggregation with meaningful semantic terms but NO filters = SEMANTIC search
+        # e.g., "All bets involving Marsile team" → search for Marsile
+        if self.aggregation == AggregationType.COUNT and self._has_meaningful_search_terms():
+            if not self.filters:  # Only if no structured filters
+                return QueryType.SEMANTIC
+        
+        # Pure aggregation (count, sum, avg) without search terms
         if self.aggregation not in (AggregationType.NONE, AggregationType.TOP_N, AggregationType.BOTTOM_N):
             return QueryType.AGGREGATE
         
@@ -123,6 +139,25 @@ class ParsedQuery:
         
         # Default to semantic
         return QueryType.SEMANTIC
+    
+    def _has_meaningful_search_terms(self) -> bool:
+        """Check if semantic_terms contain meaningful search criteria (not just filler)."""
+        if not self.semantic_terms:
+            return False
+        
+        # Filler words that don't indicate a search
+        filler_words = {
+            'that', 'which', 'where', 'when', 'what', 'how', 'who',
+            'involves', 'involving', 'include', 'includes', 'including',
+            'related', 'about', 'with', 'from', 'have', 'has', 'had',
+            'there', 'these', 'those', 'this', 'the', 'a', 'an',
+        }
+        
+        # Check if any semantic term is NOT a filler word
+        meaningful = [term for term in self.semantic_terms 
+                      if term.lower().rstrip('.?,!') not in filler_words]
+        
+        return len(meaningful) > 0
     
     @property
     def is_fully_structured(self) -> bool:
@@ -209,7 +244,8 @@ class QueryParser:
     
     # Column name synonyms → canonical column
     COLUMN_SYNONYMS: Dict[str, str] = {
-        # Stake
+        # Stake (exact column name first)
+        "stake_gbp": "stake_gbp",
         "stake": "stake_gbp",
         "amount": "stake_gbp",
         "value": "stake_gbp",
@@ -217,7 +253,8 @@ class QueryParser:
         "wager": "stake_gbp",
         "gbp": "stake_gbp",
         "£": "stake_gbp",
-        # Delay
+        # Delay (exact column name first)
+        "price_delay_ms": "price_delay_ms",
         "delay": "price_delay_ms",
         "latency": "price_delay_ms",
         "ms": "price_delay_ms",
@@ -677,9 +714,13 @@ class QueryParser:
             if indicator in text:
                 semantic_terms.append(indicator)
         
+        # Extended stop words including short common words
+        short_stop_words = stop_words | {'vs', 'am', 'pm', 'uk', 'us', 'if', 'so', 'no', 'up', 'as'}
+        
         # If there's substantial remaining text, it might need semantic search
         remaining_words = [w for w in text.split() 
-                         if len(w) > 3 and w not in stop_words]
+                         if (len(w) > 3 or (len(w) >= 2 and len(w) <= 4 and w.isalpha()))
+                         and w.lower() not in short_stop_words]
         
         # Only add remaining words if they look meaningful
         if remaining_words and not semantic_terms:
