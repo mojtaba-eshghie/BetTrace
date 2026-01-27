@@ -34,15 +34,15 @@ This assistant helps ops teams query bet records using a hybrid retrieval approa
 │  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
                                │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Database Layer                             │
-│  ┌───────────────────────────┐  ┌─────────────────────────────┐│
-│  │   SQLite (Structured)     │  │  Vector Store (Embeddings)  ││
-│  │   - Bets table            │  │  - NumPy in-memory          ││
-│  │   - Indexed columns       │  │  - Cosine similarity        ││
-│  └───────────────────────────┘  └─────────────────────────────┘│
-└─────────────────────────────────────────────────────────────────┘
+             ┌─────────────────┼─────────────────┐
+             ▼                 ▼                 ▼
+┌──────────────────────┐ ┌───────────────┐ ┌──────────────────────┐
+│    Database Layer    │ │  Embedding    │ │   SafeCalculator     │
+│  ┌────────────────┐  │ │   Service     │ │   (SQL-based math)   │
+│  │SQLite + Vector │  │ │  (singleton)  │ │                      │
+│  │    Store       │  │ │  - Caching    │ │                      │
+│  └────────────────┘  │ │  - Retry      │ │                      │
+└──────────────────────┘ └───────────────┘ └──────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -283,6 +283,32 @@ Each bet is formatted with all fields clearly labeled, plus summary statistics w
 2. **Fuzzy matching needed**: Event names contain misspellings (e.g., "Lakkers vs Celtcs")
 3. **Range queries**: Filtering by latency thresholds, stake amounts
 4. **Small dataset**: 100 rows fits comfortably in memory
+
+### Centralized EmbeddingService
+
+All embedding generation goes through a single `EmbeddingService` (`embedding_service.py`):
+
+```python
+from src.embedding_service import get_embedding_service
+
+service = get_embedding_service()  # Singleton - shared across app
+
+# Single text (cached)
+embedding = service.embed_text("some query")
+
+# Batch with caching + retry
+embeddings = service.embed_batch(["text1", "text2", ...])
+```
+
+**Features**:
+- **Singleton Pattern**: Single OpenAI client shared across Ingestion and Retrieval
+- **LRU Caching**: Avoids re-embedding identical texts (1000 entry cache)
+- **Exponential Backoff Retry**: Handles rate limits (429) and transient errors
+- **Batch Processing**: Efficient API calls with progress reporting
+
+**Why this matters**:
+- Before: Ingestion and Retriever each had their own OpenAI client and embedding logic
+- After: Single source of truth with consistent caching and error handling
 
 ### Why SQLite + FAISS (Scalable Design)?
 

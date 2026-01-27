@@ -633,8 +633,7 @@ Example bad answer: "Here are the bets: B0001 has £10..." (DO NOT DO THIS)"""
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_message}
             ],
-            # Note: gpt-5-nano only supports default temperature (1)
-            # and uses max_completion_tokens instead of max_tokens
+            # Note: GPT-5 models only support temperature=1 (default)
             max_completion_tokens=1000
         )
         
