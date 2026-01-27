@@ -253,3 +253,104 @@ Evidence: B0001, B0002
 Retrieved 2 bet(s) for context
 (.venv) mojtabae@pool4-36-234 fdjtask % 
 ```
+
+
+
+
+```bash
+(.venv) mojtabae@MBP2023A BetTrace % python main.py ask "How many bets are there?" --show-context       
+
+Question: How many bets are there?
+
+SQL Statistics (authoritative):
+============================================================
+COMPUTED FACTS (pre-calculated, DO NOT recalculate)
+============================================================
+Overall Statistics (All Bets)
+
+• Total Bets: 100
+• Total Stake: £2765.00
+• Average Stake: £27.65
+• Unique Customers: 69
+• Average Delay: 427ms
+
+Status Breakdown:
+  • SETTLED: 80 bets, £2230.00 total
+  • REJECTED: 8 bets, £220.00 total
+  • PENDING: 7 bets, £180.00 total
+  • VOID: 5 bets, £135.00 total
+
+Incident Breakdown:
+  • NONE: 75 bets
+  • MARKET_SUSPENDED: 8 bets
+  • LATENCY_SPIKE: 7 bets
+  • MANUAL_REVIEW: 6 bets
+  • FEED_OUTAGE: 4 bets
+
+⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE
+============================================================
+Retrieved Bets (3 shown):
+┏━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Bet ID ┃ Customer ┃ Event                ┃ Status  ┃ Incident      ┃ Delay ┃
+┡━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ B0001  │ C029     │ PSG vs Marsielle     │ SETTLED │ NONE          │ 214ms │
+│ B0002  │ C140     │ Rybakina vs Sabalnka │ SETTLED │ MANUAL_REVIEW │ 578ms │
+│ B0003  │ C068     │ PSG vs Marsielle     │ SETTLED │ NONE          │ 290ms │
+└────────┴──────────┴──────────────────────┴─────────┴───────────────┴───────┘
+
+╭────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────╮
+│ There are 100 bets. Evidence: [B0001, B0002, B0003]                                                                                        │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0001, B0002, B0003
+Retrieved 3 bet(s) for context
+(.venv) mojtabae@MBP2023A BetTrace % python main.py ask "Give me an overview of all bets" --show-context
+
+Question: Give me an overview of all bets
+
+SQL Statistics (authoritative):
+============================================================
+COMPUTED FACTS (pre-calculated, DO NOT recalculate)
+============================================================
+Overall Statistics (All Bets)
+
+• Total Bets: 100
+• Total Stake: £2765.00
+• Average Stake: £27.65
+• Unique Customers: 69
+• Average Delay: 427ms
+
+Status Breakdown:
+  • SETTLED: 80 bets, £2230.00 total
+  • REJECTED: 8 bets, £220.00 total
+  • PENDING: 7 bets, £180.00 total
+  • VOID: 5 bets, £135.00 total
+
+Incident Breakdown:
+  • NONE: 75 bets
+  • MARKET_SUSPENDED: 8 bets
+  • LATENCY_SPIKE: 7 bets
+  • MANUAL_REVIEW: 6 bets
+  • FEED_OUTAGE: 4 bets
+
+⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE
+============================================================
+Retrieved Bets (3 shown):
+┏━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━┓
+┃ Bet ID ┃ Customer ┃ Event                ┃ Status  ┃ Incident      ┃ Delay ┃
+┡━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━┩
+│ B0001  │ C029     │ PSG vs Marsielle     │ SETTLED │ NONE          │ 214ms │
+│ B0002  │ C140     │ Rybakina vs Sabalnka │ SETTLED │ MANUAL_REVIEW │ 578ms │
+│ B0003  │ C068     │ PSG vs Marsielle     │ SETTLED │ NONE          │ 290ms │
+└────────┴──────────┴──────────────────────┴─────────┴───────────────┴───────┘
+
+╭────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────╮
+│ There are 100 bets with a total stake of £2765.00, average stake £27.65, 69 unique customers, and average delay 427ms; status breakdown:   │
+│ SETTLED 80 bets (£2230.00), REJECTED 8 bets (£220.00), PENDING 7 bets (£180.00), VOID 5 bets (£135.00); incident breakdown: NONE 75,       │
+│ MARKET_SUSPENDED 8, LATENCY_SPIKE 7, MANUAL_REVIEW 6, FEED_OUTAGE 4. Evidence: [B0001, B0002, B0003]                                       │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0001, B0002, B0003
+Retrieved 3 bet(s) for context
+(.venv) mojtabae@MBP2023A BetTrace % 
+```

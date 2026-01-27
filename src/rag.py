@@ -24,24 +24,25 @@ from .calculator import SafeCalculator, CalculationRequest, CalculationType
 SYSTEM_PROMPT = """You are an internal operations assistant for a sports betting company. Your role is to answer questions about bet records accurately using ONLY the provided data and pre-computed statistics.
 
 CRITICAL RULES:
-1. ONLY use information from the provided bet records and COMPUTED FACTS sections.
-2. ALWAYS cite the bet_id(s) that support your answer.
-3. If information is missing, say so clearly rather than guessing.
-4. Be concise but thorough. Focus on operational insights.
-5. When explaining why something happened, look at incident_tag and status fields.
+1. For aggregate questions (counts, totals, averages, summaries), answer DIRECTLY from COMPUTED FACTS.
+2. DO NOT list individual bets when answering aggregate questions - just state the computed answer.
+3. Only describe individual bet records when asked about specific bets or when providing examples.
+4. Be CONCISE. A question like "How many bets?" should be answered with "There are 100 bets." not a list.
 
-⚠️ ARITHMETIC PROHIBITION - READ CAREFULLY:
-- You MUST NOT perform any arithmetic yourself (no adding, subtracting, multiplying, dividing)
-- You MUST NOT count items by enumerating them (e.g., "I see A, B, C, so that's 3")
-- You MUST NOT calculate percentages or averages
-- All numeric facts (totals, counts, averages, sums) are provided in COMPUTED FACTS
-- If a computation you need is not provided, state "This requires computation" - do NOT compute it
-- ONLY quote numbers exactly as they appear in COMPUTED FACTS
+⚠️ ARITHMETIC PROHIBITION:
+- You MUST NOT perform any arithmetic yourself
+- You MUST NOT count items by enumerating them
+- All numeric facts come from COMPUTED FACTS - quote them exactly
+- If a computation is not provided, say "This requires computation"
 
-RESPONSE FORMAT:
-- State the answer using ONLY pre-computed values from COMPUTED FACTS
-- Add context from individual bet records if helpful
-- End with "Evidence: [bet_ids]" listing relevant bet IDs
+RESPONSE FORMAT FOR AGGREGATE QUESTIONS:
+- State the answer from COMPUTED FACTS in ONE sentence
+- Optionally add breakdown details if relevant
+- End with "Evidence: [bet_ids]" (just list a few sample IDs)
+
+RESPONSE FORMAT FOR SPECIFIC BET QUESTIONS:
+- Describe the specific bet(s) requested
+- End with "Evidence: [bet_ids]"
 
 FIELD MEANINGS:
 - status: SETTLED (completed), PENDING (in progress), REJECTED (not accepted), VOID (cancelled)  
@@ -111,6 +112,10 @@ class RAGAssistant:
         Returns:
             RAGResponse with answer, citations, and metadata
         """
+        # For aggregate queries, show fewer bet records to avoid confusing the LLM
+        if self._is_general_aggregate_query(query):
+            top_k = min(top_k, 3)  # Only show 3 records for citation purposes
+        
         # Step 1: Retrieve relevant bets (for row-level context)
         results, all_results_count = self._retrieve_for_query(query, top_k)
         
@@ -511,17 +516,18 @@ class RAGAssistant:
             parts.append(stats_context)
             parts.append("")
             parts.append("─" * 60)
-            parts.append("INSTRUCTION: Report the COMPUTED FACTS above exactly as shown.")
-            parts.append("DO NOT count, sum, or calculate anything yourself.")
-            parts.append("The bet records below are ONLY for citing evidence.")
+            parts.append("YOUR ANSWER MUST USE THE COMPUTED FACTS ABOVE.")
+            parts.append("For aggregate questions: state the computed total, nothing more.")
+            parts.append("DO NOT list or describe individual bets for aggregate questions.")
+            parts.append("The bet records below are ONLY for the 'Evidence:' citation.")
             parts.append("─" * 60)
             parts.append("")
         
         # Note if we're showing a subset
         if total_count > shown_count:
-            parts.append(f"(Showing {shown_count} of {total_count} matching records for evidence)\n")
+            parts.append(f"(Sample of {shown_count} from {total_count} total records - for citation only)\n")
         
-        # Add row context
+        # Add row context (minimal for aggregate queries)
         parts.append(row_context)
         
         return "\n".join(parts)
@@ -547,16 +553,32 @@ class RAGAssistant:
         3. Cite relevant bet_ids
         """
         
+        # Detect if this is an aggregate question
+        query_lower = query.lower()
+        is_aggregate = any(kw in query_lower for kw in [
+            "how many", "total", "count", "sum", "average", "overview", "summary"
+        ])
+        
+        if is_aggregate:
+            instruction = """INSTRUCTIONS:
+1. Answer the question DIRECTLY using the COMPUTED FACTS values
+2. Keep your answer CONCISE (1-3 sentences for simple questions)
+3. DO NOT list individual bets - just state the computed totals
+4. End with "Evidence: [bet_ids]" listing a few sample bet IDs
+
+Example good answer: "There are 100 bets with a total stake of £2,765.00."
+Example bad answer: "Here are the bets: B0001 has £10..." (DO NOT DO THIS)"""
+        else:
+            instruction = """INSTRUCTIONS:
+1. Answer the question using the bet records provided
+2. If COMPUTED FACTS are relevant, include those values
+3. End with "Evidence: [bet_ids]" citing relevant bets"""
+        
         user_message = f"""Question: {query}
 
 {context}
 
-INSTRUCTIONS:
-1. If COMPUTED FACTS are provided, report those values EXACTLY (do not recalculate)
-2. Add relevant context from bet records if helpful
-3. End with "Evidence: [bet_ids]" citing relevant bets
-
-⚠️ CRITICAL: You must NOT perform any arithmetic. All numbers should come from COMPUTED FACTS."""
+{instruction}"""
         
         response = self.client.chat.completions.create(
             model=LLM_MODEL,
