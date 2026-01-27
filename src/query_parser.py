@@ -279,6 +279,14 @@ class QueryParser:
         "average delay": AggregationType.AVG,
         "avg delay": AggregationType.AVG,
         "mean delay": AggregationType.AVG,
+        # Existence queries (treated as count)
+        "are there any": AggregationType.COUNT,
+        "are there": AggregationType.COUNT,
+        "is there any": AggregationType.COUNT,
+        "is there a": AggregationType.COUNT,
+        "do we have": AggregationType.COUNT,
+        "does it have": AggregationType.COUNT,
+        "any": AggregationType.COUNT,  # "Any rejected bets?"
     }
     
     # Top/Bottom N indicators

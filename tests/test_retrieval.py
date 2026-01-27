@@ -836,3 +836,14 @@ class TestQueryParser:
         parsed = parser.parse("Bets with stake over £50")
         assert parsed.filters.get("min_stake") == 50.0
         assert "min_delay" not in parsed.filters
+
+    def test_parse_existence_query(self):
+        """Test 'are there any' style queries are parsed as count."""
+        from src.query_parser import get_query_parser, AggregationType
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Are there any rejected bets with delay < 500ms")
+        assert parsed.aggregation == AggregationType.COUNT
+        assert parsed.filters.get("status") == "REJECTED"
+        assert parsed.filters.get("max_delay") == 500

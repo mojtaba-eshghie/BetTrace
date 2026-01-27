@@ -256,18 +256,22 @@ class QueryExecutor:
                 execution_path="hybrid_empty"
             )
         
-        # Second: Semantic ranking of candidates
-        candidate_ids = [b.bet_id for b in candidates]
-        semantic_query = ' '.join(parsed.semantic_terms) if parsed.semantic_terms else parsed.original_query
+        # Second: Try semantic ranking of candidates if we have semantic terms
+        results = []
+        if parsed.semantic_terms and hasattr(self.retriever, 'semantic_search'):
+            # Build a semantic query from the terms
+            semantic_query = ' '.join(parsed.semantic_terms)
+            try:
+                # Get semantic results
+                semantic_results = self.retriever.semantic_search(semantic_query, top_k=top_k * 2)
+                # Filter to only candidates
+                candidate_ids = {b.bet_id for b in candidates}
+                results = [r for r in semantic_results if r.bet.bet_id in candidate_ids][:top_k]
+            except Exception:
+                # Semantic search failed, fall back to filtered results
+                pass
         
-        # Use hybrid search with filter IDs
-        results = self.db.hybrid_search(
-            query=semantic_query,
-            filters={"bet_ids": candidate_ids},
-            top_k=top_k
-        )
-        
-        # If hybrid search didn't work (no embeddings), fall back to filtered results
+        # If semantic ranking didn't work, use filtered results directly
         if not results:
             results = [
                 RetrievalResult(bet=bet, match_type="filtered_fallback")
