@@ -424,8 +424,7 @@ def ask(question: str, top_k: int, db: Optional[str], show_context: bool):
         
         # Show citations
         if response.citations:
-            # console.print(f"\n[bold]Evidence:[/bold] {', '.join(response.citations)}")
-            pass
+            console.print(f"\n[bold]Evidence:[/bold] {', '.join(response.citations)}")
         
         # Show retrieval stats
         console.print(f"[dim]Retrieved {len(response.retrieved_bets)} bet(s) for context[/dim]")

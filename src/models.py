@@ -238,3 +238,102 @@ class QueryContext:
             self.min_delay is not None,
             self.max_delay is not None
         ])
+
+
+# =============================================================================
+# Event Name Parsing Utilities
+# =============================================================================
+
+def parse_event_teams(event_name: str) -> tuple:
+    """
+    Parse an event name into individual team/player names.
+    
+    Handles formats like:
+    - "Team1 vs Team2" → ("Team1", "Team2")
+    - "Player1 vs Player2" → ("Player1", "Player2")
+    - "Team1 v Team2" → ("Team1", "Team2")
+    - "Team1 - Team2" → ("Team1", "Team2")
+    
+    Returns:
+        Tuple of (team1, team2) or (event_name, "") if parsing fails
+    """
+    import re
+    
+    # Try common separators: " vs ", " v ", " - ", " @ "
+    separators = [r'\s+vs\.?\s+', r'\s+v\s+', r'\s+-\s+', r'\s+@\s+']
+    
+    for sep in separators:
+        parts = re.split(sep, event_name, flags=re.IGNORECASE)
+        if len(parts) == 2:
+            team1, team2 = parts[0].strip(), parts[1].strip()
+            if team1 and team2:
+                return (team1, team2)
+    
+    # Fallback: return event name as team1, empty string as team2
+    return (event_name.strip(), "")
+
+
+# =============================================================================
+# Phonetic Normalization for Typo-Tolerant Matching
+# =============================================================================
+
+def phonetic_normalize(text: str) -> str:
+    """
+    Convert text to phonetic representation for typo-tolerant embedding matching.
+    
+    Uses a simplified Double Metaphone-like algorithm that:
+    - Removes vowels (except leading)
+    - Normalizes common letter substitutions
+    - Handles double letters
+    
+    Examples:
+        "Raptors" → "RPTRS"
+        "Rapters" → "RPTRS"  (same!)
+        "Lakers"  → "LKRS"
+        "Lakkers" → "LKRS"   (same!)
+        "Celtics" → "CLTCS"
+        "Celtcs"  → "CLTCS"  (same!)
+    """
+    if not text:
+        return ""
+    
+    text = text.upper().strip()
+    
+    # Keep first letter, then process rest
+    if len(text) <= 1:
+        return text
+    
+    first = text[0]
+    rest = text[1:]
+    
+    # Remove vowels from rest (they cause most spelling variations)
+    vowels = set('AEIOU')
+    rest = ''.join(c for c in rest if c not in vowels)
+    
+    # Remove consecutive duplicate letters
+    result = [first]
+    for c in rest:
+        if c != result[-1]:
+            result.append(c)
+    
+    # Common phonetic normalizations
+    normalized = ''.join(result)
+    normalized = normalized.replace('PH', 'F')
+    normalized = normalized.replace('GH', 'G')
+    normalized = normalized.replace('CK', 'K')
+    normalized = normalized.replace('SCH', 'SK')
+    normalized = normalized.replace('KN', 'N')
+    normalized = normalized.replace('WR', 'R')
+    
+    return normalized
+
+
+def get_team_phonetic_variants(team_name: str) -> list:
+    """
+    Get the team name and its phonetic normalization for embedding.
+    
+    Returns list of strings to embed - the phonetic version provides
+    typo tolerance while the original provides exact match capability.
+    """
+    phonetic = phonetic_normalize(team_name)
+    return [team_name, phonetic] if phonetic != team_name.upper() else [team_name]

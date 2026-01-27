@@ -42,7 +42,13 @@ class Database:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Scalable vector storage using FAISS
+        # Three stores for different search strategies:
+        # - Document: full bet context (broad semantic search)
+        # - Team1: first team/player (precise team search)
+        # - Team2: second team/player (precise team search)
         self._vector_store = VectorStore(EMBEDDING_DIMENSIONS)
+        self._team1_vector_store = VectorStore(EMBEDDING_DIMENSIONS)
+        self._team2_vector_store = VectorStore(EMBEDDING_DIMENSIONS)
         
         # Legacy compatibility - keep bet_ids list for ID lookups
         self._bet_ids: List[str] = []
@@ -87,10 +93,16 @@ class Database:
             """)
             
             # Embeddings table with content hash for versioning
+            # Stores multiple embeddings per bet for precise search:
+            # - embedding: full document (captures overall context)
+            # - team1_embedding: first team/player name (for precise team search)
+            # - team2_embedding: second team/player name (for precise team search)
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS embeddings (
                     bet_id TEXT PRIMARY KEY,
                     embedding BLOB NOT NULL,
+                    team1_embedding BLOB,
+                    team2_embedding BLOB,
                     content_hash TEXT,
                     FOREIGN KEY (bet_id) REFERENCES bets(bet_id)
                 )
@@ -105,11 +117,17 @@ class Database:
                 )
             """)
             
-            # Add content_hash column if it doesn't exist (migration)
+            # Add columns if they don't exist (migration)
             cursor.execute("PRAGMA table_info(embeddings)")
             columns = {row['name'] for row in cursor.fetchall()}
             if 'content_hash' not in columns:
                 cursor.execute("ALTER TABLE embeddings ADD COLUMN content_hash TEXT")
+            if 'team1_embedding' not in columns:
+                cursor.execute("ALTER TABLE embeddings ADD COLUMN team1_embedding BLOB")
+            if 'team2_embedding' not in columns:
+                cursor.execute("ALTER TABLE embeddings ADD COLUMN team2_embedding BLOB")
+            # Remove old event_embedding column if it exists (superseded by team embeddings)
+            # Note: SQLite doesn't support DROP COLUMN before 3.35, so we just ignore it
             
             # Create indexes for common queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_customer_id ON bets(customer_id)")
@@ -227,8 +245,22 @@ class Database:
                     VALUES (?, ?, ?)
                 """, (bet.bet_id, embedding.tobytes(), content_hash))
     
-    def insert_bets_batch(self, bets: List[Bet], embeddings: Optional[np.ndarray] = None):
-        """Insert multiple bets with optional embeddings (batch operation)."""
+    def insert_bets_batch(
+        self, 
+        bets: List[Bet], 
+        embeddings: Optional[np.ndarray] = None,
+        team1_embeddings: Optional[np.ndarray] = None,
+        team2_embeddings: Optional[np.ndarray] = None
+    ):
+        """
+        Insert multiple bets with optional embeddings (batch operation).
+        
+        Args:
+            bets: List of Bet objects
+            embeddings: Full document embeddings (for broad semantic search)
+            team1_embeddings: First team/player embeddings (for precise team search)
+            team2_embeddings: Second team/player embeddings (for precise team search)
+        """
         # Pre-compute documents and hashes
         documents = [b.to_document() for b in bets]
         content_hashes = [compute_content_hash(doc) for doc in documents]
@@ -250,15 +282,22 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, bet_data)
             
-            # Batch insert embeddings with content hashes if provided
+            # Batch insert embeddings with team-level embeddings if provided
             if embeddings is not None:
-                embedding_data = [
-                    (bets[i].bet_id, embeddings[i].tobytes(), content_hashes[i])
-                    for i in range(len(bets))
-                ]
+                embedding_data = []
+                for i in range(len(bets)):
+                    team1_emb = team1_embeddings[i].tobytes() if team1_embeddings is not None else None
+                    team2_emb = team2_embeddings[i].tobytes() if team2_embeddings is not None else None
+                    embedding_data.append((
+                        bets[i].bet_id, 
+                        embeddings[i].tobytes(), 
+                        team1_emb,
+                        team2_emb,
+                        content_hashes[i]
+                    ))
                 cursor.executemany("""
-                    INSERT OR REPLACE INTO embeddings (bet_id, embedding, content_hash)
-                    VALUES (?, ?, ?)
+                    INSERT OR REPLACE INTO embeddings (bet_id, embedding, team1_embedding, team2_embedding, content_hash)
+                    VALUES (?, ?, ?, ?, ?)
                 """, embedding_data)
     
     # ==================== STRUCTURED QUERIES ====================
@@ -485,34 +524,42 @@ class Database:
     
     def load_embeddings_to_memory(self):
         """
-        Load all embeddings into FAISS vector store for fast similarity search.
+        Load all embeddings into FAISS vector stores for fast similarity search.
+        
+        Loads three sets of embeddings:
+        - Document embeddings: for broad semantic search
+        - Team1 embeddings: first team/player (precise team search)
+        - Team2 embeddings: second team/player (precise team search)
         
         Uses FAISS for efficient O(log N) approximate nearest neighbor search.
         Falls back to brute force if FAISS is not installed.
-        
-        Validates that stored embeddings match the expected dimension.
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # Check if content_hash column exists (backwards compatibility)
+            # Check which columns exist (backwards compatibility)
             cursor.execute("PRAGMA table_info(embeddings)")
             columns = {row['name'] for row in cursor.fetchall()}
             has_content_hash = 'content_hash' in columns
+            has_team1_embedding = 'team1_embedding' in columns
+            has_team2_embedding = 'team2_embedding' in columns
             
+            # Build SELECT clause based on available columns
+            select_cols = ["bet_id", "embedding"]
             if has_content_hash:
-                cursor.execute(
-                    "SELECT bet_id, embedding, content_hash FROM embeddings ORDER BY bet_id"
-                )
-            else:
-                cursor.execute(
-                    "SELECT bet_id, embedding FROM embeddings ORDER BY bet_id"
-                )
+                select_cols.append("content_hash")
+            if has_team1_embedding:
+                select_cols.append("team1_embedding")
+            if has_team2_embedding:
+                select_cols.append("team2_embedding")
             
+            cursor.execute(f"SELECT {', '.join(select_cols)} FROM embeddings ORDER BY bet_id")
             rows = cursor.fetchall()
             
             if not rows:
                 self._vector_store.clear()
+                self._team1_vector_store.clear()
+                self._team2_vector_store.clear()
                 self._bet_ids = []
                 return
             
@@ -524,7 +571,6 @@ class Database:
             expected_dim = EMBEDDING_DIMENSIONS
             
             if actual_dim != expected_dim:
-                # Check stored metadata for more info
                 stored_config = self.get_embedding_config()
                 if stored_config:
                     raise ValueError(
@@ -542,27 +588,58 @@ class Database:
                         f"  Solution: Delete the database and re-ingest."
                     )
             
-            # Batch add to vector store
+            # Load document embeddings
             bet_ids = [row["bet_id"] for row in rows]
             embeddings = np.vstack([
                 np.frombuffer(row["embedding"], dtype=np.float32)
                 for row in rows
             ])
             
-            # Validate all embeddings have consistent dimensions
-            if embeddings.shape[1] != expected_dim:
-                raise ValueError(
-                    f"Embedding array has wrong shape: {embeddings.shape[1]} vs expected {expected_dim}"
-                )
-            
-            # Handle missing content_hash for backwards compatibility
-            if has_content_hash:
-                content_hashes = [row["content_hash"] or "" for row in rows]
-            else:
-                content_hashes = ["" for _ in rows]
+            content_hashes = [row["content_hash"] or "" for row in rows] if has_content_hash else ["" for _ in rows]
             
             self._vector_store.clear()
             self._vector_store.add_batch(bet_ids, embeddings, content_hashes)
+            
+            # Load team1 embeddings if available
+            self._team1_vector_store.clear()
+            if has_team1_embedding:
+                team1_embeddings_list = []
+                valid_bet_ids = []
+                for row in rows:
+                    if row["team1_embedding"]:
+                        team1_embeddings_list.append(
+                            np.frombuffer(row["team1_embedding"], dtype=np.float32)
+                        )
+                        valid_bet_ids.append(row["bet_id"])
+                
+                if team1_embeddings_list:
+                    team1_embeddings = np.vstack(team1_embeddings_list)
+                    self._team1_vector_store.add_batch(
+                        valid_bet_ids, 
+                        team1_embeddings, 
+                        ["" for _ in valid_bet_ids]
+                    )
+            
+            # Load team2 embeddings if available
+            self._team2_vector_store.clear()
+            if has_team2_embedding:
+                team2_embeddings_list = []
+                valid_bet_ids = []
+                for row in rows:
+                    if row["team2_embedding"]:
+                        # Check for non-zero embedding (team2 may be empty for some events)
+                        emb = np.frombuffer(row["team2_embedding"], dtype=np.float32)
+                        if np.any(emb != 0):
+                            team2_embeddings_list.append(emb)
+                            valid_bet_ids.append(row["bet_id"])
+                
+                if team2_embeddings_list:
+                    team2_embeddings = np.vstack(team2_embeddings_list)
+                    self._team2_vector_store.add_batch(
+                        valid_bet_ids, 
+                        team2_embeddings, 
+                        ["" for _ in valid_bet_ids]
+                    )
     
     def semantic_search(
         self,
@@ -592,6 +669,106 @@ class Database:
         
         # Filter by threshold
         return [(bet_id, score) for bet_id, score in results if score >= threshold]
+    
+    def semantic_search_teams(
+        self,
+        query_embedding: np.ndarray,
+        top_k: int = 10,
+        threshold: float = 0.0
+    ) -> List[Tuple[str, float]]:
+        """
+        Search using team-level embeddings (both team1 and team2).
+        
+        This is the most precise search for team/player names - it searches
+        each team individually, handling misspellings well because embeddings
+        for "Raptors" and "Rapters" are close in vector space.
+        
+        Args:
+            query_embedding: The embedding vector to search with
+            top_k: Number of results to return
+            threshold: Minimum similarity score (0-1)
+            
+        Returns:
+            List of (bet_id, max_similarity_score) tuples
+        """
+        if self._team1_vector_store.size() == 0:
+            self.load_embeddings_to_memory()
+        
+        # Search both team stores
+        team1_results = self._team1_vector_store.search(query_embedding, top_k=top_k * 2) if self._team1_vector_store.size() > 0 else []
+        team2_results = self._team2_vector_store.search(query_embedding, top_k=top_k * 2) if self._team2_vector_store.size() > 0 else []
+        
+        # Merge results, taking the MAX score for each bet_id
+        # (if query matches team1 OR team2, we want that bet)
+        scores = {}
+        for bet_id, score in team1_results:
+            scores[bet_id] = max(scores.get(bet_id, 0.0), score)
+        for bet_id, score in team2_results:
+            scores[bet_id] = max(scores.get(bet_id, 0.0), score)
+        
+        # Filter by threshold and sort
+        results = [(bet_id, score) for bet_id, score in scores.items() if score >= threshold]
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:top_k]
+    
+    def semantic_search_dual(
+        self,
+        query_embedding: np.ndarray,
+        top_k: int = 10,
+        threshold: float = 0.0,
+        team_weight: float = 0.7
+    ) -> List[Tuple[str, float]]:
+        """
+        Search using both document and team-level embeddings, merging results.
+        
+        This provides the best recall by combining:
+        - Document embeddings: captures broad semantic meaning
+        - Team embeddings: precise matching for team/player names with misspelling tolerance
+        
+        Args:
+            query_embedding: The embedding vector to search with
+            top_k: Number of results to return
+            threshold: Minimum similarity score (0-1)
+            team_weight: Weight for team embedding scores (0-1), rest goes to document
+            
+        Returns:
+            List of (bet_id, combined_score) tuples, sorted by score descending
+        """
+        if self._vector_store.size() == 0:
+            self.load_embeddings_to_memory()
+        
+        # Search document store
+        doc_results = self._vector_store.search(query_embedding, top_k=top_k * 2)
+        doc_scores = {bet_id: score for bet_id, score in doc_results}
+        
+        # Search team stores (get MAX of team1 and team2 for each bet)
+        team_scores = {}
+        if self._team1_vector_store.size() > 0:
+            for bet_id, score in self._team1_vector_store.search(query_embedding, top_k=top_k * 2):
+                team_scores[bet_id] = max(team_scores.get(bet_id, 0.0), score)
+        if self._team2_vector_store.size() > 0:
+            for bet_id, score in self._team2_vector_store.search(query_embedding, top_k=top_k * 2):
+                team_scores[bet_id] = max(team_scores.get(bet_id, 0.0), score)
+        
+        # Combine all bet_ids
+        all_bet_ids = set(doc_scores.keys()) | set(team_scores.keys())
+        
+        combined = []
+        doc_weight = 1.0 - team_weight
+        
+        for bet_id in all_bet_ids:
+            doc_score = doc_scores.get(bet_id, 0.0)
+            team_score = team_scores.get(bet_id, 0.0)
+            
+            # Weighted combination - team embeddings get higher weight for name searches
+            combined_score = doc_weight * doc_score + team_weight * team_score
+            
+            if combined_score >= threshold:
+                combined.append((bet_id, combined_score))
+        
+        # Sort by combined score
+        combined.sort(key=lambda x: x[1], reverse=True)
+        return combined[:top_k]
     
     def hybrid_search(
         self,

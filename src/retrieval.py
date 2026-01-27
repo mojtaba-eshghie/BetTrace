@@ -196,28 +196,73 @@ class Retriever:
         self,
         query: str,
         top_k: int = DEFAULT_TOP_K,
-        threshold: float = SIMILARITY_THRESHOLD
+        threshold: Optional[float] = None,
+        use_dual_embeddings: bool = True,
+        team_only: bool = False
     ) -> List[RetrievalResult]:
         """
         Search for bets using semantic similarity.
         
+        For team searches, uses phonetic normalization for typo tolerance:
+        - "Raptors" → "RPTRS" → embed("RPTRS")
+        - Matches stored "Rapters" → "RPTRS" → embed("RPTRS")
+        
         Args:
             query: Natural language query
             top_k: Number of results to return
-            threshold: Minimum similarity score
+            threshold: Minimum similarity score (None = use default)
+            use_dual_embeddings: Whether to use both document and team embeddings
+            team_only: If True, ONLY use team embeddings (best for team/player name searches)
             
         Returns:
             List of RetrievalResults ranked by similarity
         """
-        # Generate embedding for the query
-        query_embedding = self._get_embedding(query)
+        # Use default threshold if not specified
+        if threshold is None:
+            threshold = SIMILARITY_THRESHOLD
         
-        # Search in vector store
-        results = self.db.semantic_search(
-            query_embedding=query_embedding,
-            top_k=top_k,
-            threshold=threshold
-        )
+        # For team searches, extract and phonetically normalize the team name
+        if team_only:
+            from .models import phonetic_normalize
+            
+            # Extract meaningful terms that might be team names
+            team_terms = self._extract_team_terms(query)
+            
+            if team_terms:
+                # Phonetically normalize for typo tolerance
+                phonetic_query = ' '.join(phonetic_normalize(t) for t in team_terms)
+                query_embedding = self._get_embedding(phonetic_query)
+            else:
+                query_embedding = self._get_embedding(query)
+        else:
+            query_embedding = self._get_embedding(query)
+        
+        # Search strategy selection
+        if team_only:
+            # Team-only search with phonetic normalization
+            results = self.db.semantic_search_teams(
+                query_embedding=query_embedding,
+                top_k=top_k,
+                threshold=threshold
+            )
+            match_type = "semantic_team_phonetic"
+        elif use_dual_embeddings:
+            # Dual search: document + team embeddings with weighted combination
+            results = self.db.semantic_search_dual(
+                query_embedding=query_embedding,
+                top_k=top_k,
+                threshold=threshold,
+                team_weight=0.7
+            )
+            match_type = "semantic_team"
+        else:
+            # Document-only search
+            results = self.db.semantic_search(
+                query_embedding=query_embedding,
+                top_k=top_k,
+                threshold=threshold
+            )
+            match_type = "semantic"
         
         # Convert to RetrievalResults
         retrieval_results = []
@@ -227,10 +272,34 @@ class Retriever:
                 retrieval_results.append(RetrievalResult(
                     bet=bet,
                     score=score,
-                    match_type="semantic"
+                    match_type=match_type
                 ))
         
         return retrieval_results
+    
+    def _extract_team_terms(self, query: str) -> List[str]:
+        """
+        Extract likely team/player names from a query.
+        
+        Filters out common query words, keeping only potential team names.
+        """
+        # Common words to ignore
+        stop_words = {
+            'all', 'bets', 'bet', 'involving', 'involves', 'with', 'for',
+            'on', 'the', 'a', 'an', 'that', 'which', 'find', 'show', 'get',
+            'list', 'event', 'events', 'team', 'teams', 'game', 'games',
+            'match', 'matches', 'player', 'players', 'what', 'are', 'is',
+            'how', 'many', 'where', 'when', 'from', 'to', 'of', 'in'
+        }
+        
+        # Split query and filter
+        words = query.split()
+        team_terms = [
+            w.strip('.,?!') for w in words 
+            if w.lower().strip('.,?!') not in stop_words and len(w) >= 2
+        ]
+        
+        return team_terms
     
     # ==================== HYBRID SEARCH ====================
     

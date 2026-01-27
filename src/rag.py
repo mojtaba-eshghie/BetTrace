@@ -30,10 +30,10 @@ from .query_executor import QueryExecutor, ExecutionResult
 SYSTEM_PROMPT = """You are an internal operations assistant for a sports betting company. Your role is to answer questions about bet records accurately using ONLY the provided data and pre-computed statistics.
 
 CRITICAL RULES:
-1. For aggregate questions (counts, totals, averages, summaries), answer DIRECTLY from COMPUTED FACTS.
-2. DO NOT list individual bets when answering aggregate questions - just state the computed answer.
-3. Only describe individual bet records when asked about specific bets or when providing examples.
-4. Be CONCISE. A question like "How many bets?" should be answered with "There are 100 bets." not a list.
+1. For simple aggregate questions (just counts, totals), answer DIRECTLY from COMPUTED FACTS.
+2. When the user asks for analysis, explanation, summary, or details - PROVIDE THEM using the bet records.
+3. Follow the INSTRUCTIONS in each message - they tell you exactly what to do.
+4. Be CONCISE for simple questions, DETAILED for analysis requests.
 
 ⚠️ ARITHMETIC PROHIBITION:
 - You MUST NOT perform any arithmetic yourself
@@ -41,14 +41,10 @@ CRITICAL RULES:
 - All numeric facts come from COMPUTED FACTS - quote them exactly
 - If a computation is not provided, say "This requires computation"
 
-RESPONSE FORMAT FOR AGGREGATE QUESTIONS:
-- State the answer from COMPUTED FACTS in ONE sentence
-- Optionally add breakdown details if relevant
-- End with "Evidence: [bet_ids]" (just list a few sample IDs)
-
-RESPONSE FORMAT FOR SPECIFIC BET QUESTIONS:
-- Describe the specific bet(s) requested
-- End with "Evidence: [bet_ids]"
+RESPONSE FORMAT:
+- For simple counts: "There are X bets with total stake of £Y."
+- For analysis requests: Start with summary stats, then describe individual bets with patterns/anomalies.
+- Always end with "Evidence: [bet_ids]"
 
 FIELD MEANINGS:
 - status: SETTLED (completed), PENDING (in progress), REJECTED (not accepted), VOID (cancelled)  
@@ -201,16 +197,24 @@ class RAGAssistant:
             parts.append("─" * 60)
             parts.append("YOUR ANSWER MUST USE THE COMPUTED FACTS ABOVE.")
             
-            # Different instructions based on query type
-            # HYBRID and SEMANTIC queries need individual bet analysis
-            if parsed.query_type in (QueryType.AGGREGATE, QueryType.TOP_N) and parsed.query_type != QueryType.HYBRID:
+            # Check if query has semantic/analysis intent
+            analysis_keywords = ['summarize', 'analyze', 'explain', 'describe', 
+                                'what happened', 'why', 'interesting', 'notable',
+                                'tell me about', 'details', 'breakdown']
+            has_analysis_intent = any(kw in parsed.original_query.lower() for kw in analysis_keywords)
+            
+            # Different instructions based on query type and intent
+            # Pure count/sum aggregates without analysis intent: just state the numbers
+            # TOP_N queries or anything with analysis intent: allow individual bet analysis
+            if parsed.query_type == QueryType.AGGREGATE and not has_analysis_intent:
                 parts.append("For this query: state the computed values directly.")
                 parts.append("DO NOT list or enumerate individual bets.")
                 parts.append("The bet records below are ONLY for the 'Evidence:' citation.")
             else:
                 parts.append("Use the computed facts for any totals/averages.")
                 parts.append("You may describe and analyze individual bets as needed.")
-                parts.append("If the user asks about 'interesting' or 'notable' bets, analyze them.")
+                if has_analysis_intent:
+                    parts.append("The user wants analysis - explain what you observe in the data.")
             
             parts.append("─" * 60)
             parts.append("")
@@ -253,8 +257,16 @@ class RAGAssistant:
     def _generate_answer(self, query: str, context: str, parsed: ParsedQuery) -> str:
         """Generate an answer using the LLM."""
         
-        # Determine instruction based on query type
-        if parsed.query_type in (QueryType.AGGREGATE, QueryType.TOP_N):
+        # Check if query has analysis/summary intent
+        analysis_keywords = ['summarize', 'analyze', 'explain', 'describe', 
+                            'what happened', 'why', 'interesting', 'notable',
+                            'tell me about', 'details', 'breakdown', 'highlight',
+                            'severely', 'affected', 'list them']
+        has_analysis_intent = any(kw in parsed.original_query.lower() for kw in analysis_keywords)
+        
+        # Determine instruction based on query type AND intent
+        if parsed.query_type in (QueryType.AGGREGATE, QueryType.TOP_N) and not has_analysis_intent:
+            # Pure aggregate - just state numbers
             instruction = """INSTRUCTIONS:
 1. Answer the question DIRECTLY using the COMPUTED FACTS values
 2. Keep your answer CONCISE (1-3 sentences for simple questions)
@@ -263,11 +275,37 @@ class RAGAssistant:
 
 Example good answer: "There are 100 bets with a total stake of £2,765.00."
 Example bad answer: "Here are the bets: B0001 has £10..." (DO NOT DO THIS)"""
+        elif has_analysis_intent:
+            # User wants analysis/summary/explanation
+            instruction = """⚠️ ANALYSIS REQUIRED - DO NOT give a simple count!
+
+INSTRUCTIONS:
+1. Start with summary from COMPUTED FACTS (totals, averages)
+2. Then LIST and DESCRIBE each bet record showing:
+   - Bet ID, Customer ID, Event name
+   - Status, Incident type, Delay (highlight if high)
+   - Any patterns or notable observations
+3. Conclude with key insights
+
+EXAMPLE FORMAT for "List bets voided due to FEED_OUTAGE":
+"There were 4 bets voided due to FEED_OUTAGE with a total stake of £95.00:
+
+- B0028 (Customer C022): Zverev vs Tsitsipas, tennis. Delay: 495ms.
+- B0050 (Customer C106): Man Utd vs Newcastle, football. Delay: 1073ms - notably high.
+- B0066 (Customer C033): Warriors vs Suns, basketball. Delay: 1078ms - also elevated.
+- B0094 (Customer C011): Medvedev vs Runee, tennis. Delay: 1194ms - highest of the group.
+
+All 4 bets were cancelled due to data feed issues. The delays ranged from 495ms to 1194ms.
+
+Evidence: [B0028, B0050, B0066, B0094]"
+
+NOW provide a similar detailed response for the user's question."""
         else:
             instruction = """INSTRUCTIONS:
 1. Answer the question using the bet records provided
 2. If COMPUTED FACTS are available, include those values
-3. End with "Evidence: [bet_ids]" citing relevant bets"""
+3. Describe relevant details from the bet records
+4. End with "Evidence: [bet_ids]" citing relevant bets"""
         
         user_message = f"""Question: {query}
 
@@ -281,7 +319,7 @@ Example bad answer: "Here are the bets: B0001 has £10..." (DO NOT DO THIS)"""
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": user_message}
             ],
-            max_completion_tokens=1000
+            max_completion_tokens=2000  # Increased for detailed analysis
         )
         
         answer = response.choices[0].message.content
@@ -293,11 +331,42 @@ Example bad answer: "Here are the bets: B0001 has £10..." (DO NOT DO THIS)"""
     
     def _generate_fallback_answer(self, query: str, context: str, parsed: ParsedQuery) -> str:
         """Generate a fallback answer when LLM returns empty."""
-        # Try to extract key info from context
+        # Try to extract key info from context for a more helpful response
+        lines = []
+        
+        # Extract total bets
         if "Total Bets:" in context:
             match = re.search(r'Total Bets:\s*(\d+)', context)
             if match:
-                return f"There are {match.group(1)} bets matching your query."
+                lines.append(f"Found {match.group(1)} matching bets.")
+        
+        # Extract total stake
+        if "Total Stake:" in context:
+            match = re.search(r'Total Stake:\s*£([\d,\.]+)', context)
+            if match:
+                lines.append(f"Total stake: £{match.group(1)}.")
+        
+        # Extract average delay
+        if "Average Delay:" in context:
+            match = re.search(r'Average Delay:\s*(\d+)ms', context)
+            if match:
+                lines.append(f"Average delay: {match.group(1)}ms.")
+        
+        # Extract rankings if present
+        rankings = re.findall(r'\d+\.\s+(B\d{4}):\s*(\d+)ms.*?([A-Z_]+)\)', context)
+        if rankings:
+            lines.append("\nTop delays:")
+            for bet_id, delay, incident in rankings[:5]:
+                lines.append(f"  - {bet_id}: {delay}ms ({incident})")
+        
+        # Extract bet IDs for evidence
+        bet_ids = re.findall(r'\bB\d{4}\b', context)
+        if bet_ids:
+            unique_ids = list(dict.fromkeys(bet_ids))[:10]  # Preserve order, limit to 10
+            lines.append(f"\nEvidence: [{', '.join(unique_ids)}]")
+        
+        if lines:
+            return "\n".join(lines)
         
         return "I found relevant records but couldn't generate a detailed answer. Please try rephrasing your question."
     

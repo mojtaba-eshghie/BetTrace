@@ -878,3 +878,157 @@ class TestQueryParser:
         # Should be hybrid (has semantic term) not aggregate
         assert parsed.query_type.value == "hybrid"
         assert "suspicious" in parsed.semantic_terms
+
+    def test_parse_top_n_with_summary_request(self):
+        """Test 'top 5 ... and summarize' is parsed as top_n, not hybrid."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Find the top 5 highest price_delay_ms bets and summarize what happened.")
+        assert parsed.query_type.value == "top_n"
+        assert parsed.sort_by == "price_delay_ms"
+        assert parsed.limit == 5
+    
+    def test_parse_exact_column_names(self):
+        """Test that exact column names like 'price_delay_ms' work."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # price_delay_ms should be recognized
+        parsed = parser.parse("Top 3 bets by price_delay_ms")
+        assert parsed.sort_by == "price_delay_ms"
+        
+        # stake_gbp should be recognized
+        parsed = parser.parse("Top 3 bets by stake_gbp")
+        assert parsed.sort_by == "stake_gbp"
+
+    def test_parse_all_bets_with_entity_search(self):
+        """Test 'all bets involving X' is parsed as semantic, not aggregate."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # "All bets involving Marsile" should search for Marsile, not count all
+        parsed = parser.parse("All bets that involves Marsile team.")
+        assert parsed.query_type.value == "semantic"
+        assert "marsile" in [t.lower().rstrip('.') for t in parsed.semantic_terms]
+    
+    def test_parse_all_bets_aggregate(self):
+        """Test 'all bets' without search terms is aggregate."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Plain "all bets" should be aggregate
+        parsed = parser.parse("All bets")
+        assert parsed.query_type.value == "aggregate"
+
+    def test_parse_team_search_as_semantic(self):
+        """Test 'all bets involving X team' is parsed as semantic search, not aggregate."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("All bets that involves Marsile team.")
+        assert parsed.query_type.value == "semantic"
+        # Should have meaningful search terms
+        assert parsed._has_meaningful_search_terms()
+        # Should have 'marsile' in semantic terms
+        assert any('marsile' in term.lower() for term in parsed.semantic_terms)
+    
+    def test_meaningful_search_terms(self):
+        """Test _has_meaningful_search_terms filters correctly."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Query with only filler words should return False
+        parsed = parser.parse("All bets that have this")
+        assert not parsed._has_meaningful_search_terms()
+        
+        # Query with meaningful term should return True
+        parsed = parser.parse("All bets involving Manchester")
+        assert parsed._has_meaningful_search_terms()
+
+    def test_parse_event_teams(self):
+        """Test parsing event names into individual team/player names."""
+        from src.models import parse_event_teams
+        
+        # Standard "vs" format
+        assert parse_event_teams("Bulls vs Rapters") == ("Bulls", "Rapters")
+        assert parse_event_teams("PSG vs Marsielle") == ("PSG", "Marsielle")
+        
+        # Alternative separators
+        assert parse_event_teams("Team1 v Team2") == ("Team1", "Team2")
+        assert parse_event_teams("Home - Away") == ("Home", "Away")
+        
+        # Multi-word team names
+        assert parse_event_teams("West Ham vs Fullham") == ("West Ham", "Fullham")
+        
+        # Single participant (fallback)
+        team1, team2 = parse_event_teams("SingleTeam")
+        assert team1 == "SingleTeam"
+        assert team2 == ""
+
+    def test_is_team_search_detection(self):
+        """Test that team/player searches are detected correctly."""
+        from src.query_executor import QueryExecutor
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Team search queries
+        team_queries = [
+            "All bets involving Raptors",
+            "Bets on Lakers",
+            "PSG bets",
+            "Find Marsielle bets",
+        ]
+        
+        # Non-team queries (broader semantic)
+        non_team_queries = [
+            "What are the suspicious bets with high delay?",
+            "Show me rejected bets",
+            "How many bets had incidents?",
+        ]
+        
+        # Create a minimal executor to test _is_team_search
+        from src.database import Database
+        from src.retrieval import Retriever
+        from src.calculator import SafeCalculator
+        from src.config import DATABASE_PATH
+        
+        db = Database(DATABASE_PATH)
+        retriever = Retriever(db)
+        calculator = SafeCalculator(db.db_path)
+        executor = QueryExecutor(db, retriever, calculator)
+        
+        for q in team_queries:
+            parsed = parser.parse(q)
+            assert executor._is_team_search(parsed), f"Expected team search: {q}"
+        
+        for q in non_team_queries:
+            parsed = parser.parse(q)
+            # These might or might not be team searches depending on implementation
+            # Just verify no exceptions are raised
+            executor._is_team_search(parsed)
+
+    def test_phonetic_normalization(self):
+        """Test phonetic normalization produces same code for misspellings."""
+        from src.models import phonetic_normalize
+        
+        # These pairs should produce the same phonetic code
+        pairs = [
+            ("Raptors", "Rapters"),
+            ("Lakers", "Lakkers"),
+            ("Celtics", "Celtcs"),
+            ("Warriors", "Warriros"),
+            ("Marseille", "Marsielle"),
+            ("Nuggets", "Nuggetts"),
+        ]
+        
+        for correct, misspelled in pairs:
+            assert phonetic_normalize(correct) == phonetic_normalize(misspelled), \
+                f"Expected {correct} and {misspelled} to have same phonetic code"
