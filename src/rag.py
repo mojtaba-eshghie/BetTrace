@@ -2,6 +2,11 @@
 RAG (Retrieval-Augmented Generation) module for the Sportsbook Assistant.
 
 Combines retrieval with LLM generation to produce grounded, cited answers.
+
+Key Design: LLMs do NOT do math!
+- All calculations are performed by SafeCalculator (SQL-based)
+- LLM receives pre-computed facts in COMPUTED FACTS section
+- LLM's job is ONLY to narrate and explain, never to calculate
 """
 
 from typing import List, Optional, Tuple
@@ -12,26 +17,34 @@ from .config import OPENAI_API_KEY, LLM_MODEL, validate_config
 from .models import Bet, RetrievalResult
 from .retrieval import Retriever
 from .database import Database
+from .calculator import SafeCalculator, CalculationRequest, CalculationType
 
 
 # System prompt for the RAG assistant
-SYSTEM_PROMPT = """You are an internal operations assistant for a sports betting company. Your role is to answer questions about bet records accurately and concisely.
+SYSTEM_PROMPT = """You are an internal operations assistant for a sports betting company. Your role is to answer questions about bet records accurately using ONLY the provided data and pre-computed statistics.
 
 CRITICAL RULES:
-1. ONLY use information from the provided bet records. Never make up or assume data.
+1. ONLY use information from the provided bet records and COMPUTED FACTS sections.
 2. ALWAYS cite the bet_id(s) that support your answer.
-3. If the provided records don't contain enough information to answer, say so clearly and suggest what additional information is needed (e.g., "I need the bet_id" or "I need the customer_id").
-4. Be concise but thorough. Focus on the operational insights.
-5. When explaining why something happened (e.g., rejection), look at the incident_tag and status fields.
-6. For latency issues, note the price_delay_ms values and compare to normal (~200ms average).
+3. If information is missing, say so clearly rather than guessing.
+4. Be concise but thorough. Focus on operational insights.
+5. When explaining why something happened, look at incident_tag and status fields.
+
+⚠️ ARITHMETIC PROHIBITION - READ CAREFULLY:
+- You MUST NOT perform any arithmetic yourself (no adding, subtracting, multiplying, dividing)
+- You MUST NOT count items by enumerating them (e.g., "I see A, B, C, so that's 3")
+- You MUST NOT calculate percentages or averages
+- All numeric facts (totals, counts, averages, sums) are provided in COMPUTED FACTS
+- If a computation you need is not provided, state "This requires computation" - do NOT compute it
+- ONLY quote numbers exactly as they appear in COMPUTED FACTS
 
 RESPONSE FORMAT:
-- Provide a clear, direct answer first
-- Include relevant details from the bet records
-- End with "Evidence: [bet_ids]" listing all bet IDs used
+- State the answer using ONLY pre-computed values from COMPUTED FACTS
+- Add context from individual bet records if helpful
+- End with "Evidence: [bet_ids]" listing relevant bet IDs
 
 FIELD MEANINGS:
-- status: SETTLED (completed), PENDING (in progress), REJECTED (not accepted), VOID (cancelled)
+- status: SETTLED (completed), PENDING (in progress), REJECTED (not accepted), VOID (cancelled)  
 - incident_tag: NONE (normal), LATENCY_SPIKE (high delay), FEED_OUTAGE (data feed issue), MARKET_SUSPENDED (market closed), MANUAL_REVIEW (flagged for review)
 - price_delay_ms: Latency in milliseconds. Normal is ~200ms. Above 1000ms indicates issues."""
 
@@ -54,9 +67,15 @@ class RAGAssistant:
     Workflow:
     1. Analyze the query to determine retrieval strategy
     2. Retrieve relevant bet records
-    3. Format context from retrieved records
-    4. Generate answer using LLM with grounding instructions
-    5. Extract citations and return structured response
+    3. COMPUTE all needed facts via SafeCalculator (SQL-based, deterministic)
+    4. Format context with COMPUTED FACTS section
+    5. Generate answer using LLM (narration only, no arithmetic)
+    6. Extract citations and return structured response
+    
+    Key Principle: LLMs cannot do math reliably, so we:
+    - Pre-compute ALL numeric values (totals, counts, averages, rankings)
+    - Present them as immutable COMPUTED FACTS
+    - LLM's job is ONLY to explain and format these facts
     """
     
     def __init__(self, db: Optional[Database] = None):
@@ -64,6 +83,7 @@ class RAGAssistant:
         self.db = db or Database()
         self.db.load_embeddings_to_memory()
         self.retriever = Retriever(self.db)
+        self.calculator = SafeCalculator(self.db.db_path)
         self._client: Optional[OpenAI] = None
     
     @property
@@ -195,83 +215,184 @@ class RAGAssistant:
     
     def _compute_sql_aggregations(self, query: str) -> Optional[str]:
         """
-        Compute aggregations via SQL based on query type.
+        Compute aggregations via SafeCalculator based on query type.
         
-        This ensures aggregations are ALWAYS computed on the full dataset,
-        not just the top_k rows shown to the LLM.
+        This ensures:
+        1. All math is done deterministically in SQL
+        2. LLM receives pre-computed facts (never calculates itself)
+        3. Results are formatted clearly as COMPUTED FACTS
+        
+        The LLM should ONLY report these values, never recalculate them.
         """
         query_lower = query.lower()
         lines = []
         
-        # Customer-specific aggregations
+        # Customer-specific calculations
         customer_id = self.retriever._extract_customer_id(query)
         if customer_id:
-            stats = self.db.get_customer_stats(customer_id)
-            if stats:
-                lines.append("=== COMPLETE CUSTOMER STATISTICS (from database) ===")
-                lines.append(f"Customer: {stats['customer_id']}")
-                lines.append(f"Total Bets: {stats['total_bets']}")
-                lines.append(f"Total Stake: £{stats['total_stake']:.2f}")
-                lines.append(f"Average Stake: £{stats['avg_stake']:.2f}")
-                lines.append(f"Average Delay: {stats['avg_delay']:.0f}ms")
-                lines.append(f"Delay Range: {stats['min_delay']}ms - {stats['max_delay']}ms")
-                lines.append(f"Status Breakdown: {stats['status_breakdown']}")
-                lines.append(f"Incident Breakdown: {stats['incident_breakdown']}")
-                lines.append(f"Sport Breakdown: {stats['sport_breakdown']}")
-                lines.append("")
-                return "\n".join(lines)
+            lines.append("=" * 60)
+            lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
+            lines.append("=" * 60)
+            lines.append(f"Customer: {customer_id}")
+            lines.append("")
+            
+            # Execute calculations
+            count = self.calculator.count_bets(customer_id=customer_id)
+            total_stake = self.calculator.sum_stake(customer_id=customer_id)
+            avg_stake = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.AVG, column="stake_gbp",
+                filters={"customer_id": customer_id}
+            ))
+            avg_delay = self.calculator.avg_delay(customer_id=customer_id)
+            max_delay = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.MAX, column="price_delay_ms",
+                filters={"customer_id": customer_id}
+            ))
+            status_breakdown = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.GROUP_BY, column="bet_id",
+                filters={"customer_id": customer_id}, group_by="status"
+            ))
+            
+            lines.append(f"• Total Bets: {count.value}")
+            lines.append(f"• Total Stake: £{total_stake.value}")
+            lines.append(f"• Average Stake: £{avg_stake.value:.2f}" if avg_stake.value else "• Average Stake: N/A")
+            lines.append(f"• Average Delay: {avg_delay.value:.0f}ms" if avg_delay.value else "• Average Delay: N/A")
+            lines.append(f"• Maximum Delay: {max_delay.value}ms" if max_delay.value else "• Maximum Delay: N/A")
+            lines.append(f"• Status Breakdown: {status_breakdown.value}")
+            lines.append("")
+            lines.append("⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE")
+            lines.append("=" * 60)
+            return "\n".join(lines)
         
-        # Incident-specific aggregations
+        # Incident-specific calculations
         incident_tag = self.retriever._extract_incident_tag(query)
         if incident_tag:
-            stats = self.db.get_incident_stats(incident_tag)
-            if stats:
-                lines.append("=== COMPLETE INCIDENT STATISTICS (from database) ===")
-                lines.append(f"Incident Type: {stats['incident_tag']}")
-                lines.append(f"Total Bets Affected: {stats['total_bets']}")
-                lines.append(f"Unique Customers Affected: {stats['unique_customers']}")
-                lines.append(f"Total Stake at Risk: £{stats['total_stake']:.2f}")
-                lines.append(f"Average Stake: £{stats['avg_stake']:.2f}")
-                lines.append(f"Average Delay: {stats['avg_delay']:.0f}ms")
-                lines.append(f"Delay Range: {stats['min_delay']}ms - {stats['max_delay']}ms")
-                lines.append(f"Status Breakdown: {stats['status_breakdown']}")
-                lines.append("")
-                lines.append("Customers Ranked by Impact:")
-                for i, cust in enumerate(stats['customers_affected'], 1):
-                    lines.append(f"  {i}. {cust['customer_id']}: {cust['bet_count']} bet(s), max delay {cust['max_delay']}ms")
-                lines.append("")
-                return "\n".join(lines)
+            lines.append("=" * 60)
+            lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
+            lines.append("=" * 60)
+            lines.append(f"Incident Type: {incident_tag}")
+            lines.append("")
+            
+            count = self.calculator.count_bets(incident_tag=incident_tag)
+            customers = self.calculator.customers_affected(incident_tag=incident_tag)
+            total_stake = self.calculator.sum_stake(incident_tag=incident_tag)
+            avg_delay = self.calculator.avg_delay(incident_tag=incident_tag)
+            max_delay = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.MAX, column="price_delay_ms",
+                filters={"incident_tag": incident_tag}
+            ))
+            
+            lines.append(f"• Total Bets Affected: {count.value}")
+            lines.append(f"• Unique Customers Affected: {customers.value}")
+            lines.append(f"• Total Stake at Risk: £{total_stake.value}")
+            lines.append(f"• Average Delay: {avg_delay.value:.0f}ms" if avg_delay.value else "• Average Delay: N/A")
+            lines.append(f"• Maximum Delay: {max_delay.value}ms" if max_delay.value else "• Maximum Delay: N/A")
+            lines.append("")
+            lines.append("⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE")
+            lines.append("=" * 60)
+            return "\n".join(lines)
         
-        # Status-specific aggregations
+        # Status-specific calculations
         status = self.retriever._extract_status(query)
         if status:
-            stats = self.db.get_status_stats(status)
-            if stats:
-                lines.append("=== COMPLETE STATUS STATISTICS (from database) ===")
-                lines.append(f"Status: {stats['status']}")
-                lines.append(f"Total Bets: {stats['total_bets']}")
-                lines.append(f"Unique Customers: {stats['unique_customers']}")
-                lines.append(f"Total Stake: £{stats['total_stake']:.2f}")
-                lines.append(f"Average Stake: £{stats['avg_stake']:.2f}")
-                lines.append(f"Average Delay: {stats['avg_delay']:.0f}ms")
-                lines.append(f"Incident Breakdown: {stats['incident_breakdown']}")
-                lines.append("")
-                return "\n".join(lines)
+            lines.append("=" * 60)
+            lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
+            lines.append("=" * 60)
+            lines.append(f"Status: {status}")
+            lines.append("")
+            
+            count = self.calculator.count_bets(status=status)
+            customers = self.calculator.customers_affected(status=status)
+            total_stake = self.calculator.sum_stake(status=status)
+            avg_stake = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.AVG, column="stake_gbp",
+                filters={"status": status}
+            ))
+            avg_delay = self.calculator.avg_delay(status=status)
+            incident_breakdown = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.GROUP_BY, column="bet_id",
+                filters={"status": status}, group_by="incident_tag"
+            ))
+            
+            lines.append(f"• Total Bets: {count.value}")
+            lines.append(f"• Unique Customers: {customers.value}")
+            lines.append(f"• Total Stake: £{total_stake.value}")
+            lines.append(f"• Average Stake: £{avg_stake.value:.2f}" if avg_stake.value else "• Average Stake: N/A")
+            lines.append(f"• Average Delay: {avg_delay.value:.0f}ms" if avg_delay.value else "• Average Delay: N/A")
+            lines.append(f"• Incident Breakdown: {incident_breakdown.value}")
+            lines.append("")
+            lines.append("⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE")
+            lines.append("=" * 60)
+            return "\n".join(lines)
         
-        # Top delay aggregations
+        # Top delay calculations
         if ("highest" in query_lower or "top" in query_lower) and self.retriever._is_latency_query(query):
             limit = self.retriever._extract_number(query) or 5
-            stats = self.db.get_top_delay_stats(limit)
-            if stats:
-                lines.append(f"=== TOP {limit} DELAY STATISTICS (from database) ===")
-                lines.append(f"Total Stake: £{stats['total_stake']:.2f}")
-                lines.append(f"Delay Range: {stats['min_delay']}ms - {stats['max_delay']}ms")
-                lines.append(f"Average Delay: {stats['avg_delay']:.0f}ms")
-                lines.append(f"Incident Breakdown: {stats['incident_breakdown']}")
-                lines.append(f"Status Breakdown: {stats['status_breakdown']}")
-                lines.append("")
-                return "\n".join(lines)
+            
+            lines.append("=" * 60)
+            lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
+            lines.append("=" * 60)
+            lines.append(f"Top {limit} Bets by Delay")
+            lines.append("")
+            
+            top_results = self.calculator.top_by_delay(n=limit)
+            total_stake = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.SUM, column="stake_gbp",
+                filters={"price_delay_ms": {"gte": 1000}}
+            ))
+            
+            lines.append(f"• High-Latency Bet Count (>1000ms): {len([r for r in top_results.value if r['price_delay_ms'] >= 1000])}")
+            lines.append(f"• Total Stake in Top {limit}: £{sum(r['stake_gbp'] for r in top_results.value)}")
+            lines.append("")
+            lines.append("Rankings (by delay, highest first):")
+            for i, bet in enumerate(top_results.value, 1):
+                lines.append(f"  {i}. {bet['bet_id']}: {bet['price_delay_ms']}ms (£{bet['stake_gbp']}, {bet['incident_tag']})")
+            lines.append("")
+            lines.append("⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE")
+            lines.append("=" * 60)
+            return "\n".join(lines)
         
+        # Sport-specific calculations
+        sport_match = self._extract_sport(query)
+        if sport_match:
+            lines.append("=" * 60)
+            lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
+            lines.append("=" * 60)
+            lines.append(f"Sport: {sport_match}")
+            lines.append("")
+            
+            count = self.calculator.count_bets(sport=sport_match)
+            total_stake = self.calculator.sum_stake(sport=sport_match)
+            customers = self.calculator.customers_affected(sport=sport_match)
+            status_breakdown = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.GROUP_BY, column="bet_id",
+                filters={"sport": sport_match}, group_by="status"
+            ))
+            
+            lines.append(f"• Total Bets: {count.value}")
+            lines.append(f"• Total Stake: £{total_stake.value}")
+            lines.append(f"• Unique Customers: {customers.value}")
+            lines.append(f"• Status Breakdown: {status_breakdown.value}")
+            lines.append("")
+            lines.append("⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE")
+            lines.append("=" * 60)
+            return "\n".join(lines)
+        
+        return None
+    
+    def _extract_sport(self, query: str) -> Optional[str]:
+        """Extract sport name from query."""
+        query_lower = query.lower()
+        sports = {
+            "football": "football",
+            "soccer": "football",
+            "tennis": "tennis",
+            "basketball": "basketball",
+            "nba": "basketball"
+        }
+        for keyword, sport in sports.items():
+            if keyword in query_lower:
+                return sport
         return None
     
     def _format_row_context(self, results: List[RetrievalResult], max_rows: int) -> str:
@@ -304,18 +425,31 @@ class RAGAssistant:
         total_count: int,
         shown_count: int
     ) -> str:
-        """Combine row context and stats context with clear separation."""
+        """
+        Combine computed facts and row context for the LLM.
+        
+        Structure:
+        1. COMPUTED FACTS (pre-calculated values the LLM must use)
+        2. BET RECORDS (for evidence/citations only)
+        
+        The LLM should NEVER recalculate anything from the bet records.
+        """
         parts = []
         
-        # Add stats context first (this is the authoritative data)
+        # Add computed facts first (this is authoritative)
         if stats_context:
             parts.append(stats_context)
-            parts.append("IMPORTANT: Use the statistics above for any counts, totals, or averages.")
-            parts.append("The bet records below are for evidence/citation purposes.\n")
+            parts.append("")
+            parts.append("─" * 60)
+            parts.append("INSTRUCTION: Report the COMPUTED FACTS above exactly as shown.")
+            parts.append("DO NOT count, sum, or calculate anything yourself.")
+            parts.append("The bet records below are ONLY for citing evidence.")
+            parts.append("─" * 60)
+            parts.append("")
         
         # Note if we're showing a subset
         if total_count > shown_count:
-            parts.append(f"Note: Showing {shown_count} of {total_count} matching records.\n")
+            parts.append(f"(Showing {shown_count} of {total_count} matching records for evidence)\n")
         
         # Add row context
         parts.append(row_context)
@@ -333,13 +467,26 @@ class RAGAssistant:
         return self._format_row_context(results, len(results))
     
     def _generate_answer(self, query: str, context: str) -> str:
-        """Generate an answer using the LLM."""
+        """
+        Generate an answer using the LLM.
+        
+        The LLM receives pre-computed facts and must NOT do any arithmetic.
+        Its job is ONLY to:
+        1. Report the computed values exactly as given
+        2. Add context/explanation from individual bet records
+        3. Cite relevant bet_ids
+        """
         
         user_message = f"""Question: {query}
 
 {context}
 
-Please answer the question based ONLY on the bet records above. Remember to cite bet_ids and end with "Evidence: [bet_ids]"."""
+INSTRUCTIONS:
+1. If COMPUTED FACTS are provided, report those values EXACTLY (do not recalculate)
+2. Add relevant context from bet records if helpful
+3. End with "Evidence: [bet_ids]" citing relevant bets
+
+⚠️ CRITICAL: You must NOT perform any arithmetic. All numbers should come from COMPUTED FACTS."""
         
         response = self.client.chat.completions.create(
             model=LLM_MODEL,
