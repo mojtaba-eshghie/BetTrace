@@ -2,16 +2,73 @@
 Data models for the Sportsbook RAG Assistant.
 
 Defines the Bet model and related data structures.
+
+Currency Handling:
+- All monetary values use Python's Decimal for exact precision
+- Database stores stake as INTEGER (pence) to avoid float precision issues
+- Conversion functions provided for boundary handling
 """
 
 from dataclasses import dataclass, asdict
-from typing import Optional, List
+from typing import Optional, List, Any, Union
+from decimal import Decimal, ROUND_HALF_UP
 import json
 
 
+# =============================================================================
+# Currency Utility Functions
+# =============================================================================
+
+def to_decimal(value: Any) -> Decimal:
+    """
+    Convert a value to Decimal with proper precision for currency.
+    
+    This handles the conversion safely to avoid float precision issues.
+    Always rounds to 2 decimal places for GBP currency.
+    """
+    if isinstance(value, Decimal):
+        return value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if isinstance(value, float):
+        # Convert float to string first to avoid float precision issues
+        # Round to 2 decimal places for currency
+        return Decimal(str(round(value, 2))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if isinstance(value, int):
+        return Decimal(value).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return Decimal(str(value)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def to_pence(value: Union[Decimal, float, int]) -> int:
+    """
+    Convert pounds to pence for database storage.
+    
+    Storing as INTEGER pence avoids all floating point issues in SQLite.
+    """
+    if not isinstance(value, Decimal):
+        value = to_decimal(value)
+    return int((value * 100).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def from_pence(value: int) -> Decimal:
+    """
+    Convert pence from database back to pounds as Decimal.
+    """
+    return (Decimal(value) / 100).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+# =============================================================================
+# Data Models
+# =============================================================================
+
 @dataclass
 class Bet:
-    """Represents a single bet record."""
+    """
+    Represents a single bet record.
+    
+    Currency Handling:
+    - stake_gbp is stored as Decimal for exact precision in Python
+    - Use stake_pence() when storing to database
+    - Database stores as INTEGER (pence) to avoid float issues
+    """
     
     bet_id: str
     customer_id: str
@@ -19,13 +76,22 @@ class Bet:
     event_name: str
     market: str
     selection: str
-    stake_gbp: float
+    stake_gbp: Decimal  # Use Decimal for exact currency representation
     status: str
     incident_tag: str
     price_delay_ms: int
     # Stored document text (the exact text that was embedded)
     # This is populated when loading from database, None when creating new
     stored_document: Optional[str] = None
+    
+    def __post_init__(self):
+        """Ensure stake_gbp is always a Decimal."""
+        if not isinstance(self.stake_gbp, Decimal):
+            self.stake_gbp = to_decimal(self.stake_gbp)
+    
+    def stake_pence(self) -> int:
+        """Get stake in pence for database storage."""
+        return to_pence(self.stake_gbp)
     
     def to_dict(self) -> dict:
         """Convert bet to dictionary (excludes stored_document as it's derived)."""
@@ -36,7 +102,7 @@ class Bet:
             "event_name": self.event_name,
             "market": self.market,
             "selection": self.selection,
-            "stake_gbp": self.stake_gbp,
+            "stake_gbp": float(self.stake_gbp),  # Convert for JSON serialization
             "status": self.status,
             "incident_tag": self.incident_tag,
             "price_delay_ms": self.price_delay_ms
@@ -97,10 +163,32 @@ class Bet:
             event_name=str(data["event_name"]),
             market=str(data["market"]),
             selection=str(data["selection"]),
-            stake_gbp=float(data["stake_gbp"]),
+            stake_gbp=to_decimal(data["stake_gbp"]),
             status=str(data["status"]),
             incident_tag=str(data["incident_tag"]),
             price_delay_ms=int(data["price_delay_ms"])
+        )
+    
+    @classmethod
+    def from_db_row_pence(cls, row: dict) -> "Bet":
+        """
+        Create a Bet from a database row where stake is stored as pence.
+        
+        Args:
+            row: Database row as dict with stake_pence column
+        """
+        return cls(
+            bet_id=str(row["bet_id"]),
+            customer_id=str(row["customer_id"]),
+            sport=str(row["sport"]),
+            event_name=str(row["event_name"]),
+            market=str(row["market"]),
+            selection=str(row["selection"]),
+            stake_gbp=from_pence(row["stake_pence"]),
+            status=str(row["status"]),
+            incident_tag=str(row["incident_tag"]),
+            price_delay_ms=int(row["price_delay_ms"]),
+            stored_document=row.get("document")
         )
 
 
@@ -131,8 +219,8 @@ class QueryContext:
     sports: Optional[List[str]] = None
     statuses: Optional[List[str]] = None
     incident_tags: Optional[List[str]] = None
-    min_stake: Optional[float] = None
-    max_stake: Optional[float] = None
+    min_stake: Optional[Decimal] = None
+    max_stake: Optional[Decimal] = None
     min_delay: Optional[int] = None
     max_delay: Optional[int] = None
     top_k: int = 10

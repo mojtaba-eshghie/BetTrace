@@ -329,6 +329,31 @@ Selection: No. Status: REJECTED. Incident: MARKET_SUSPENDED. High latency: 635ms
 
 This allows semantic search to match concepts like "rejected bets" or "high latency incidents".
 
+### Currency Handling (No Float Precision Errors)
+
+Financial applications must avoid floating-point precision errors (e.g., `0.1 + 0.2 ≠ 0.3`).
+
+**Python Layer** (`models.py`):
+- All monetary values use `Decimal` for exact arithmetic
+- `to_decimal()` - converts any input safely to Decimal
+- `to_pence()` / `from_pence()` - for INTEGER storage
+
+```python
+from src.models import Bet, to_decimal
+
+# Creating bets - stake is always converted to Decimal
+bet = Bet.from_dict({"stake_gbp": 10.99, ...})
+print(type(bet.stake_gbp))  # <class 'decimal.Decimal'>
+
+# Arithmetic is exact
+total = bet1.stake_gbp + bet2.stake_gbp  # Returns Decimal
+```
+
+**Database Layer** (`database.py`):
+- Currently stores as `REAL` for backwards compatibility
+- For production: store as `INTEGER` pence (`bet.stake_pence()`)
+- Conversion happens at boundary in `_row_to_bet()`
+
 ## Future Improvements
 
 With more time, I would add:

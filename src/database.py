@@ -4,6 +4,12 @@ Database layer for the Sportsbook RAG Assistant.
 Provides hybrid storage combining:
 - SQLite for structured data (exact lookups, filtering, aggregations)
 - FAISS-based vector store for embeddings (scalable semantic search)
+
+Currency Note:
+- Python uses Decimal for exact currency arithmetic
+- SQLite stores stake as REAL (for backwards compatibility)
+- Conversion happens at the boundary via to_decimal()
+- For production, store as INTEGER pence (bet.stake_pence())
 """
 
 import sqlite3
@@ -12,8 +18,9 @@ import numpy as np
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any, Set
 from contextlib import contextmanager
+from decimal import Decimal
 
-from .models import Bet, RetrievalResult
+from .models import Bet, RetrievalResult, to_decimal, to_pence, from_pence
 from .config import DATABASE_PATH, EMBEDDING_DIMENSIONS
 from .vector_store import VectorStore, compute_content_hash, EmbeddingVersionManager
 
@@ -121,7 +128,7 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # Insert bet record
+            # Insert bet record (convert Decimal to float for SQLite REAL)
             cursor.execute("""
                 INSERT OR REPLACE INTO bets 
                 (bet_id, customer_id, sport, event_name, market, selection,
@@ -129,7 +136,7 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 bet.bet_id, bet.customer_id, bet.sport, bet.event_name,
-                bet.market, bet.selection, bet.stake_gbp, bet.status,
+                bet.market, bet.selection, float(bet.stake_gbp), bet.status,
                 bet.incident_tag, bet.price_delay_ms, document
             ))
             
@@ -149,10 +156,10 @@ class Database:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
-            # Batch insert bets
+            # Batch insert bets (convert Decimal stake to float for SQLite REAL)
             bet_data = [
                 (b.bet_id, b.customer_id, b.sport, b.event_name, b.market,
-                 b.selection, b.stake_gbp, b.status, b.incident_tag,
+                 b.selection, float(b.stake_gbp), b.status, b.incident_tag,
                  b.price_delay_ms, documents[i])
                 for i, b in enumerate(bets)
             ]
@@ -569,7 +576,11 @@ class Database:
     # ==================== HELPER METHODS ====================
     
     def _row_to_bet(self, row: sqlite3.Row) -> Bet:
-        """Convert a database row to a Bet object."""
+        """
+        Convert a database row to a Bet object.
+        
+        Converts stake from REAL to Decimal for exact currency handling.
+        """
         return Bet(
             bet_id=row["bet_id"],
             customer_id=row["customer_id"],
@@ -577,7 +588,7 @@ class Database:
             event_name=row["event_name"],
             market=row["market"],
             selection=row["selection"],
-            stake_gbp=row["stake_gbp"],
+            stake_gbp=to_decimal(row["stake_gbp"]),  # Convert to Decimal
             status=row["status"],
             incident_tag=row["incident_tag"],
             price_delay_ms=row["price_delay_ms"],
