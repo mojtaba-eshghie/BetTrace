@@ -597,14 +597,20 @@ class Database:
         self,
         query_embedding: np.ndarray,
         filters: Dict[str, Any],
-        top_k: int = 10,
-        semantic_weight: float = 0.5
+        top_k: int = 10
     ) -> List[RetrievalResult]:
         """
         Hybrid search combining semantic similarity with structured filters.
         
-        Uses FAISS filtered search for efficiency - SQL filter first,
-        then vector search only on matching IDs.
+        Strategy:
+        1. SQL filter first (efficient structured filtering)
+        2. If embeddings available: rank by semantic similarity
+        3. If no embeddings: return by recency (bet_id DESC) as explicit fallback
+        
+        NOTE: We removed the unused `semantic_weight` parameter. If weighted
+        scoring is needed in the future, implement it explicitly with:
+        - final_score = semantic_weight * semantic_score + (1 - semantic_weight) * sql_score
+        - This requires defining what "sql_score" means for your use case
         """
         # Get filtered bets via SQL
         filtered_bets = self.advanced_filter(**filters)
@@ -620,10 +626,16 @@ class Database:
             self.load_embeddings_to_memory()
         
         if self._vector_store.size() == 0:
-            # No embeddings, return filtered results without scores
+            # No embeddings available - return by bet_id descending (most recent first)
+            # This is explicit about the ordering rather than arbitrary
+            sorted_bets = sorted(filtered_bets, key=lambda b: b.bet_id, reverse=True)
             return [
-                RetrievalResult(bet=bet, score=None, match_type="filtered")
-                for bet in filtered_bets[:top_k]
+                RetrievalResult(
+                    bet=bet, 
+                    score=None, 
+                    match_type="filtered_no_embeddings"  # Explicit about no semantic ranking
+                )
+                for bet in sorted_bets[:top_k]
             ]
         
         # Use FAISS filtered search - efficient for any filter size
@@ -633,7 +645,7 @@ class Database:
             filter_ids=filtered_ids
         )
         
-        # Build result objects
+        # Build result objects - O(n) dict creation + O(k) lookups = O(n+k)
         bet_map = {bet.bet_id: bet for bet in filtered_bets}
         results = []
         for bet_id, score in search_results:
