@@ -363,6 +363,56 @@ With more time, I would add:
 3. **Caching**: Cache embeddings and frequent queries
 4. **Streaming**: Support larger datasets with chunked processing
 5. **Evaluation**: Build test set with ground truth for retrieval metrics
+
+## Key Design Decision: LLMs Do Not Do Math
+
+**Problem**: LLMs are notoriously bad at arithmetic. Asking them to count items, sum values, or calculate averages produces unreliable results.
+
+**Solution**: The `SafeCalculator` module (`src/calculator.py`) handles ALL numeric computations:
+
+```python
+# All calculations are executed via SQL (deterministic, exact)
+calculator = SafeCalculator(db_path)
+
+# Count, sum, average - all computed in SQL
+result = calculator.sum_stake(status="SETTLED")
+# Returns: CalculationResult(value=Decimal('2230.00'), sql_used="SELECT SUM...")
+
+# Rankings
+top_5 = calculator.top_by_delay(n=5)
+
+# Groupings
+by_status = calculator.group_by_status()
+```
+
+**How it works**:
+1. Query analysis determines what calculations are needed
+2. `SafeCalculator` executes calculations via parameterized SQL
+3. Results are formatted as **COMPUTED FACTS** in the LLM context
+4. LLM's job is ONLY to narrate and explain - never to calculate
+
+**Example context sent to LLM**:
+```
+============================================================
+COMPUTED FACTS (pre-calculated, DO NOT recalculate)
+============================================================
+Status: SETTLED
+
+• Total Bets: 80
+• Total Stake: £2230.00
+• Average Stake: £27.88
+
+⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE
+============================================================
+
+The bet records below are ONLY for citing evidence.
+```
+
+**Safety features**:
+- Only whitelisted columns allowed (no SQL injection)
+- All queries are parameterized
+- Read-only database connection
+- Uses Decimal for exact currency arithmetic
 6. **Web UI**: Flask/FastAPI endpoint with React frontend
 
 ## License

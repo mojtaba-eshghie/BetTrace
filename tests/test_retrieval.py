@@ -372,3 +372,109 @@ class TestRAGFormatting:
         
         assert "B0001" in citations
         assert "B9999" not in citations  # Should be filtered out
+
+
+# =============================================================================
+# Calculator Tests
+# =============================================================================
+
+class TestCalculator:
+    """Tests for the SafeCalculator module."""
+# Fixed calculator tests based on sample_bets fixture:
+# B0001: C001, SETTLED, £10, 100ms, NONE
+# B0002: C001, PENDING, £20, 2500ms, LATENCY_SPIKE
+# B0003: C002, REJECTED, £50, 500ms, MARKET_SUSPENDED
+
+class TestCalculator:
+    """Tests for the SafeCalculator module."""
+    
+    def test_count_all_bets(self, test_db):
+        from src.calculator import SafeCalculator
+        calc = SafeCalculator(test_db.db_path)
+        
+        result = calc.count_bets()
+        assert result.value == 3  # 3 bets in sample_bets
+    
+    def test_sum_stake_filtered(self, test_db):
+        from src.calculator import SafeCalculator
+        calc = SafeCalculator(test_db.db_path)
+        
+        result = calc.sum_stake(status="SETTLED")
+        # Only B0001 is SETTLED with £10
+        assert float(result.value) == 10.0
+    
+    def test_sum_all_stake(self, test_db):
+        from src.calculator import SafeCalculator
+        calc = SafeCalculator(test_db.db_path)
+        
+        result = calc.sum_stake()
+        # £10 + £20 + £50 = £80
+        assert float(result.value) == 80.0
+    
+    def test_avg_delay(self, test_db):
+        from src.calculator import SafeCalculator
+        calc = SafeCalculator(test_db.db_path)
+        
+        result = calc.avg_delay()
+        # Average of 100, 2500, 500 = 1033.33
+        assert abs(result.value - 1033.33) < 1
+    
+    def test_customers_affected(self, test_db):
+        from src.calculator import SafeCalculator
+        calc = SafeCalculator(test_db.db_path)
+        
+        result = calc.customers_affected(status="SETTLED")
+        # Only C001 has SETTLED bet
+        assert result.value == 1
+    
+    def test_all_customers(self, test_db):
+        from src.calculator import SafeCalculator
+        calc = SafeCalculator(test_db.db_path)
+        
+        result = calc.customers_affected()
+        # C001 and C002
+        assert result.value == 2
+    
+    def test_top_by_delay(self, test_db):
+        from src.calculator import SafeCalculator
+        calc = SafeCalculator(test_db.db_path)
+        
+        result = calc.top_by_delay(n=2)
+        assert len(result.value) == 2
+        # B0002 has highest delay (2500ms)
+        assert result.value[0]["bet_id"] == "B0002"
+        assert result.value[0]["price_delay_ms"] == 2500
+    
+    def test_group_by_status(self, test_db):
+        from src.calculator import SafeCalculator
+        calc = SafeCalculator(test_db.db_path)
+        
+        result = calc.group_by_status()
+        # 1 SETTLED, 1 REJECTED, 1 PENDING
+        assert result.value["SETTLED"]["count"] == 1
+        assert result.value["REJECTED"]["count"] == 1
+        assert result.value["PENDING"]["count"] == 1
+    
+    def test_invalid_column_rejected(self, test_db):
+        from src.calculator import SafeCalculator, CalculationRequest, CalculationType
+        calc = SafeCalculator(test_db.db_path)
+        
+        # Try to use an invalid column
+        with pytest.raises(ValueError, match="not allowed"):
+            calc.execute(CalculationRequest(
+                calc_type=CalculationType.SUM,
+                column="malicious_column"
+            ))
+    
+    def test_range_filter(self, test_db):
+        from src.calculator import SafeCalculator, CalculationRequest, CalculationType
+        calc = SafeCalculator(test_db.db_path)
+        
+        # Count bets with delay > 1000ms
+        result = calc.execute(CalculationRequest(
+            calc_type=CalculationType.COUNT,
+            column="*",
+            filters={"price_delay_ms": {"gt": 1000}}
+        ))
+        # Only B0002 (2500ms)
+        assert result.value == 1
