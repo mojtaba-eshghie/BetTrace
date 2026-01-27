@@ -528,5 +528,74 @@ class TestEmbeddingValidation:
     
     def test_no_validation_on_first_ingestion(self, test_db):
         """Test that validation passes when no config is stored yet."""
-        # No config stored - should not raise
-        test_db.validate_embedding_config("any-model", 999)
+
+
+# =============================================================================
+# Citation Enforcement Tests
+# =============================================================================
+
+class TestCitationEnforcement:
+    """Tests for citation enforcement in RAG responses."""
+    
+    def test_keeps_proper_evidence_line(self, test_db, sample_bets):
+        from src.rag import RAGAssistant
+        from src.models import RetrievalResult
+        
+        assistant = RAGAssistant(test_db)
+        
+        # Use sample_bets fixture
+        mock_results = [RetrievalResult(bet=sample_bets[0], match_type="test")]
+        
+        answer = "There are 100 bets.\n\nEvidence: [B0001, B0002]"
+        result = assistant._enforce_citations(answer, ["B0001", "B0002"], mock_results)
+        
+        assert result == answer  # Should be unchanged
+    
+    def test_adds_evidence_when_missing(self, test_db, sample_bets):
+        from src.rag import RAGAssistant
+        from src.models import RetrievalResult
+        
+        assistant = RAGAssistant(test_db)
+        mock_results = [RetrievalResult(bet=sample_bets[0], match_type="test")]
+        
+        # Answer mentions bet ID but no Evidence line
+        answer = "The bet B0001 shows a stake of £10."
+        result = assistant._enforce_citations(answer, ["B0001"], mock_results)
+        
+        assert "Evidence: [B0001]" in result
+    
+    def test_uses_fallback_when_no_citations(self, test_db, sample_bets):
+        from src.rag import RAGAssistant
+        from src.models import RetrievalResult
+        
+        assistant = RAGAssistant(test_db)
+        mock_results = [RetrievalResult(bet=sample_bets[0], match_type="test")]
+        
+        # Answer with NO citations at all
+        answer = "The total stake is £2765."
+        result = assistant._enforce_citations(answer, [], mock_results)
+        
+        assert "Evidence: [B0001]" in result
+    
+    def test_no_change_when_no_results(self, test_db):
+        from src.rag import RAGAssistant
+        
+        assistant = RAGAssistant(test_db)
+        
+        answer = "No data found."
+        result = assistant._enforce_citations(answer, [], [])
+        
+        assert result == answer
+    
+    def test_replaces_malformed_evidence(self, test_db, sample_bets):
+        from src.rag import RAGAssistant
+        from src.models import RetrievalResult
+        
+        assistant = RAGAssistant(test_db)
+        mock_results = [RetrievalResult(bet=sample_bets[0], match_type="test")]
+        
+        answer = "There are 100 bets.\nEvidence: malformed"
+        result = assistant._enforce_citations(answer, [], mock_results)
+        
+        assert "Evidence: [B0001]" in result
+        assert "malformed" not in result

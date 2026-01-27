@@ -142,8 +142,13 @@ class RAGAssistant:
         # Step 5: Generate answer
         answer = self._generate_answer(query, context)
         
-        # Step 6: Extract citations
+        # Step 6: Extract and enforce citations
         citations = self._extract_citations(answer, results)
+        answer = self._enforce_citations(answer, citations, results)
+        
+        # Re-extract citations in case we added them
+        if not citations and results:
+            citations = self._extract_citations(answer, results)
         
         # Step 7: Check if evidence was sufficient
         sufficient = not any(phrase in answer.lower() for phrase in [
@@ -737,6 +742,54 @@ Example bad answer: "Here are the bets: B0001 has £10..." (DO NOT DO THIS)"""
                 seen.add(bid)
         
         return citations
+    
+    def _enforce_citations(
+        self,
+        answer: str,
+        extracted_citations: List[str],
+        results: List[RetrievalResult]
+    ) -> str:
+        """
+        Enforce that the answer includes citations.
+        
+        Rules:
+        1. If LLM included "Evidence: ..." with valid citations → keep as-is
+        2. If LLM forgot citations but we have results → append Evidence line
+        3. If citations are in answer but not in Evidence format → append Evidence line
+        
+        This ensures citations are ALWAYS present when we have retrieved results.
+        """
+        import re
+        
+        if not results:
+            return answer
+        
+        # Check if answer already has a proper Evidence line
+        evidence_pattern = r'Evidence:\s*\[?([^\]]+)\]?'
+        has_evidence_line = bool(re.search(evidence_pattern, answer, re.IGNORECASE))
+        
+        # Get bet IDs from results for fallback
+        result_ids = [r.bet.bet_id for r in results]
+        
+        if extracted_citations and has_evidence_line:
+            # LLM did its job - keep the answer as-is
+            return answer
+        
+        # Determine which citations to use
+        if extracted_citations:
+            # LLM mentioned bet IDs in the answer but maybe not in Evidence format
+            citation_ids = extracted_citations
+        else:
+            # LLM forgot to cite - use the retrieved bet IDs
+            # Limit to first 5 to keep it readable
+            citation_ids = result_ids[:5]
+        
+        # Remove any malformed Evidence line and append a proper one
+        answer = re.sub(r'\n*Evidence:.*$', '', answer, flags=re.IGNORECASE | re.MULTILINE).strip()
+        
+        # Append proper Evidence line
+        evidence_line = f"\n\nEvidence: [{', '.join(citation_ids)}]"
+        return answer + evidence_line
     
     def interactive_session(self):
         """Run an interactive Q&A session."""
