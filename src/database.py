@@ -96,6 +96,15 @@ class Database:
                 )
             """)
             
+            # Metadata table for embedding model configuration
+            # This ensures we detect dimension/model mismatches
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS embedding_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+            
             # Add content_hash column if it doesn't exist (migration)
             cursor.execute("PRAGMA table_info(embeddings)")
             columns = {row['name'] for row in cursor.fetchall()}
@@ -108,6 +117,77 @@ class Database:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_status ON bets(status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_incident_tag ON bets(incident_tag)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_price_delay ON bets(price_delay_ms)")
+    
+    def _get_metadata(self, key: str) -> Optional[str]:
+        """Get a metadata value from the database."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM embedding_metadata WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row["value"] if row else None
+    
+    def _set_metadata(self, key: str, value: str):
+        """Set a metadata value in the database."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT OR REPLACE INTO embedding_metadata (key, value) VALUES (?, ?)",
+                (key, value)
+            )
+    
+    def get_embedding_config(self) -> Optional[Dict[str, Any]]:
+        """Get the stored embedding configuration."""
+        model = self._get_metadata("embedding_model")
+        dim_str = self._get_metadata("embedding_dimension")
+        
+        if model and dim_str:
+            return {
+                "model": model,
+                "dimension": int(dim_str),
+                "created_at": self._get_metadata("embedding_created_at")
+            }
+        return None
+    
+    def set_embedding_config(self, model: str, dimension: int):
+        """
+        Store the embedding configuration.
+        
+        This is called during ingestion to record what model/dimension was used.
+        """
+        from datetime import datetime
+        
+        self._set_metadata("embedding_model", model)
+        self._set_metadata("embedding_dimension", str(dimension))
+        self._set_metadata("embedding_created_at", datetime.now().isoformat())
+    
+    def validate_embedding_config(self, model: str, dimension: int) -> None:
+        """
+        Validate that the current config matches stored config.
+        
+        Raises ValueError if there's a mismatch.
+        """
+        stored = self.get_embedding_config()
+        
+        if stored is None:
+            # No stored config - this is first ingestion
+            return
+        
+        if stored["dimension"] != dimension:
+            raise ValueError(
+                f"Embedding dimension mismatch!\n"
+                f"  Stored in DB: {stored['dimension']} (from model '{stored['model']}')\n"
+                f"  Current config: {dimension} (from model '{model}')\n"
+                f"  Solution: Either use the same model, or delete the database and re-ingest."
+            )
+        
+        if stored["model"] != model:
+            # Warn but don't fail - dimension is what matters
+            import warnings
+            warnings.warn(
+                f"Embedding model changed from '{stored['model']}' to '{model}'. "
+                f"Dimensions match ({dimension}), but semantic compatibility is not guaranteed. "
+                f"Consider re-ingesting for best results."
+            )
     
     def clear(self):
         """Clear all data from the database."""
@@ -409,6 +489,8 @@ class Database:
         
         Uses FAISS for efficient O(log N) approximate nearest neighbor search.
         Falls back to brute force if FAISS is not installed.
+        
+        Validates that stored embeddings match the expected dimension.
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -436,12 +518,42 @@ class Database:
             
             self._bet_ids = [row["bet_id"] for row in rows]
             
+            # Validate embedding dimensions before loading
+            first_embedding = np.frombuffer(rows[0]["embedding"], dtype=np.float32)
+            actual_dim = len(first_embedding)
+            expected_dim = EMBEDDING_DIMENSIONS
+            
+            if actual_dim != expected_dim:
+                # Check stored metadata for more info
+                stored_config = self.get_embedding_config()
+                if stored_config:
+                    raise ValueError(
+                        f"Embedding dimension mismatch!\n"
+                        f"  Stored embeddings: {actual_dim} dimensions (model: {stored_config['model']})\n"
+                        f"  Expected (config): {expected_dim} dimensions\n"
+                        f"  Stored at: {stored_config['created_at']}\n"
+                        f"  Solution: Delete the database and re-ingest with the current model."
+                    )
+                else:
+                    raise ValueError(
+                        f"Embedding dimension mismatch!\n"
+                        f"  Stored embeddings: {actual_dim} dimensions\n"
+                        f"  Expected (config): {expected_dim} dimensions\n"
+                        f"  Solution: Delete the database and re-ingest."
+                    )
+            
             # Batch add to vector store
             bet_ids = [row["bet_id"] for row in rows]
             embeddings = np.vstack([
                 np.frombuffer(row["embedding"], dtype=np.float32)
                 for row in rows
             ])
+            
+            # Validate all embeddings have consistent dimensions
+            if embeddings.shape[1] != expected_dim:
+                raise ValueError(
+                    f"Embedding array has wrong shape: {embeddings.shape[1]} vs expected {expected_dim}"
+                )
             
             # Handle missing content_hash for backwards compatibility
             if has_content_hash:
