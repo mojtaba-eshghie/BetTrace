@@ -433,7 +433,9 @@ def ask(question: str, top_k: int, db: Optional[str], show_context: bool):
             console.print("\n[yellow]⚠ The answer may be incomplete due to insufficient evidence.[/yellow]")
         
     except Exception as e:
+        import traceback
         console.print(f"[bold red]Error:[/bold red] {e}")
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
         raise click.Abort()
 
 

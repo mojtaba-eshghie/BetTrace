@@ -71,7 +71,8 @@ sportsbook-rag/
 │   ├── __init__.py
 │   ├── config.py        # Configuration and settings
 │   ├── models.py        # Data models (Bet, RetrievalResult)
-│   ├── database.py      # SQLite + vector storage
+│   ├── database.py      # SQLite + FAISS hybrid storage
+│   ├── vector_store.py  # FAISS-based vector storage with content hashing
 │   ├── ingestion.py     # CSV loading and embedding generation
 │   ├── retrieval.py     # Retrieval strategies
 │   ├── rag.py           # RAG generation with LLM
@@ -283,12 +284,34 @@ Each bet is formatted with all fields clearly labeled, plus summary statistics w
 3. **Range queries**: Filtering by latency thresholds, stake amounts
 4. **Small dataset**: 100 rows fits comfortably in memory
 
-### Why SQLite + NumPy (not a Vector DB)?
+### Why SQLite + FAISS (Scalable Design)?
 
-For 100 rows, a full vector database (Pinecone, Weaviate) is overkill:
-- SQLite provides fast indexed lookups
-- NumPy cosine similarity is sufficient for in-memory search
-- No external dependencies or infrastructure needed
+The system uses a hybrid approach that scales from 100 to 100K+ rows:
+
+**FAISS Vector Store** (`vector_store.py`):
+- O(log N) approximate nearest neighbor search (vs O(N) brute force)
+- Filtered vector search without loading all data into Python
+- Falls back to NumPy if FAISS not installed
+
+**Embedding Versioning**:
+- Content hash stored with each embedding
+- Detects when document format changes require re-embedding
+- Prevents semantic drift between stored embeddings and current documents
+
+**Filtered Hybrid Search**:
+- SQL pre-filters bets (e.g., `sport='football'`)
+- FAISS searches only among filtered IDs
+- Avoids O(N) Python loop over all embeddings
+
+```python
+# Old (O(N) Python loop):
+for bet_id in all_bet_ids:
+    if bet_id in filtered_ids:
+        compute_similarity(embedding)
+
+# New (FAISS filtered search):
+vector_store.search(query, filter_ids=filtered_ids)  # O(log K) where K=filter size
+```
 
 ### Document Representation
 

@@ -3,24 +3,30 @@ Database layer for the Sportsbook RAG Assistant.
 
 Provides hybrid storage combining:
 - SQLite for structured data (exact lookups, filtering, aggregations)
-- NumPy-based vector store for embeddings (semantic search)
+- FAISS-based vector store for embeddings (scalable semantic search)
 """
 
 import sqlite3
 import json
 import numpy as np
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Set
 from contextlib import contextmanager
 
 from .models import Bet, RetrievalResult
 from .config import DATABASE_PATH, EMBEDDING_DIMENSIONS
+from .vector_store import VectorStore, compute_content_hash, EmbeddingVersionManager
 
 
 class Database:
     """
     Hybrid database combining SQLite for structured data
-    and in-memory vector storage for embeddings.
+    and FAISS-based vector storage for embeddings.
+    
+    Scalability improvements:
+    - Uses FAISS for O(log N) approximate nearest neighbor search
+    - Supports filtered vector search without loading all data into Python
+    - Content hashing for embedding versioning
     """
     
     def __init__(self, db_path: Optional[Path] = None):
@@ -28,9 +34,14 @@ class Database:
         self.db_path = db_path or DATABASE_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Vector storage (in-memory for this small dataset)
-        self._embeddings: Optional[np.ndarray] = None
+        # Scalable vector storage using FAISS
+        self._vector_store = VectorStore(EMBEDDING_DIMENSIONS)
+        
+        # Legacy compatibility - keep bet_ids list for ID lookups
         self._bet_ids: List[str] = []
+        
+        # Embedding version manager
+        self._version_manager = EmbeddingVersionManager(self.db_path)
         
         # Initialize SQLite schema
         self._init_schema()
@@ -68,14 +79,21 @@ class Database:
                 )
             """)
             
-            # Embeddings table (stored as JSON blob for simplicity)
+            # Embeddings table with content hash for versioning
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS embeddings (
                     bet_id TEXT PRIMARY KEY,
                     embedding BLOB NOT NULL,
+                    content_hash TEXT,
                     FOREIGN KEY (bet_id) REFERENCES bets(bet_id)
                 )
             """)
+            
+            # Add content_hash column if it doesn't exist (migration)
+            cursor.execute("PRAGMA table_info(embeddings)")
+            columns = {row['name'] for row in cursor.fetchall()}
+            if 'content_hash' not in columns:
+                cursor.execute("ALTER TABLE embeddings ADD COLUMN content_hash TEXT")
             
             # Create indexes for common queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_customer_id ON bets(customer_id)")
@@ -90,13 +108,16 @@ class Database:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM embeddings")
             cursor.execute("DELETE FROM bets")
-        self._embeddings = None
+        self._vector_store.clear()
         self._bet_ids = []
     
     # ==================== INSERT OPERATIONS ====================
     
     def insert_bet(self, bet: Bet, embedding: Optional[np.ndarray] = None):
         """Insert a single bet with optional embedding."""
+        document = bet.to_document()
+        content_hash = compute_content_hash(document)
+        
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -109,18 +130,22 @@ class Database:
             """, (
                 bet.bet_id, bet.customer_id, bet.sport, bet.event_name,
                 bet.market, bet.selection, bet.stake_gbp, bet.status,
-                bet.incident_tag, bet.price_delay_ms, bet.to_document()
+                bet.incident_tag, bet.price_delay_ms, document
             ))
             
-            # Insert embedding if provided
+            # Insert embedding with content hash if provided
             if embedding is not None:
                 cursor.execute("""
-                    INSERT OR REPLACE INTO embeddings (bet_id, embedding)
-                    VALUES (?, ?)
-                """, (bet.bet_id, embedding.tobytes()))
+                    INSERT OR REPLACE INTO embeddings (bet_id, embedding, content_hash)
+                    VALUES (?, ?, ?)
+                """, (bet.bet_id, embedding.tobytes(), content_hash))
     
     def insert_bets_batch(self, bets: List[Bet], embeddings: Optional[np.ndarray] = None):
         """Insert multiple bets with optional embeddings (batch operation)."""
+        # Pre-compute documents and hashes
+        documents = [b.to_document() for b in bets]
+        content_hashes = [compute_content_hash(doc) for doc in documents]
+        
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -128,8 +153,8 @@ class Database:
             bet_data = [
                 (b.bet_id, b.customer_id, b.sport, b.event_name, b.market,
                  b.selection, b.stake_gbp, b.status, b.incident_tag,
-                 b.price_delay_ms, b.to_document())
-                for b in bets
+                 b.price_delay_ms, documents[i])
+                for i, b in enumerate(bets)
             ]
             cursor.executemany("""
                 INSERT OR REPLACE INTO bets 
@@ -138,15 +163,15 @@ class Database:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, bet_data)
             
-            # Batch insert embeddings if provided
+            # Batch insert embeddings with content hashes if provided
             if embeddings is not None:
                 embedding_data = [
-                    (bets[i].bet_id, embeddings[i].tobytes())
+                    (bets[i].bet_id, embeddings[i].tobytes(), content_hashes[i])
                     for i in range(len(bets))
                 ]
                 cursor.executemany("""
-                    INSERT OR REPLACE INTO embeddings (bet_id, embedding)
-                    VALUES (?, ?)
+                    INSERT OR REPLACE INTO embeddings (bet_id, embedding, content_hash)
+                    VALUES (?, ?, ?)
                 """, embedding_data)
     
     # ==================== STRUCTURED QUERIES ====================
@@ -372,23 +397,53 @@ class Database:
     # ==================== SEMANTIC SEARCH ====================
     
     def load_embeddings_to_memory(self):
-        """Load all embeddings into memory for fast similarity search."""
+        """
+        Load all embeddings into FAISS vector store for fast similarity search.
+        
+        Uses FAISS for efficient O(log N) approximate nearest neighbor search.
+        Falls back to brute force if FAISS is not installed.
+        """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT bet_id, embedding FROM embeddings ORDER BY bet_id")
+            
+            # Check if content_hash column exists (backwards compatibility)
+            cursor.execute("PRAGMA table_info(embeddings)")
+            columns = {row['name'] for row in cursor.fetchall()}
+            has_content_hash = 'content_hash' in columns
+            
+            if has_content_hash:
+                cursor.execute(
+                    "SELECT bet_id, embedding, content_hash FROM embeddings ORDER BY bet_id"
+                )
+            else:
+                cursor.execute(
+                    "SELECT bet_id, embedding FROM embeddings ORDER BY bet_id"
+                )
+            
             rows = cursor.fetchall()
             
             if not rows:
-                self._embeddings = None
+                self._vector_store.clear()
                 self._bet_ids = []
                 return
             
             self._bet_ids = [row["bet_id"] for row in rows]
-            embeddings_list = [
+            
+            # Batch add to vector store
+            bet_ids = [row["bet_id"] for row in rows]
+            embeddings = np.vstack([
                 np.frombuffer(row["embedding"], dtype=np.float32)
                 for row in rows
-            ]
-            self._embeddings = np.vstack(embeddings_list)
+            ])
+            
+            # Handle missing content_hash for backwards compatibility
+            if has_content_hash:
+                content_hashes = [row["content_hash"] or "" for row in rows]
+            else:
+                content_hashes = ["" for _ in rows]
+            
+            self._vector_store.clear()
+            self._vector_store.add_batch(bet_ids, embeddings, content_hashes)
     
     def semantic_search(
         self,
@@ -397,7 +452,7 @@ class Database:
         threshold: float = 0.0
     ) -> List[Tuple[str, float]]:
         """
-        Find most similar bets using cosine similarity.
+        Find most similar bets using cosine similarity via FAISS.
         
         Args:
             query_embedding: The embedding vector to search with
@@ -407,33 +462,17 @@ class Database:
         Returns:
             List of (bet_id, similarity_score) tuples
         """
-        if self._embeddings is None:
+        if self._vector_store.size() == 0:
             self.load_embeddings_to_memory()
         
-        if self._embeddings is None or len(self._bet_ids) == 0:
+        if self._vector_store.size() == 0:
             return []
         
-        # Normalize query embedding
-        query_norm = query_embedding / np.linalg.norm(query_embedding)
+        # Use FAISS vector store for efficient search
+        results = self._vector_store.search(query_embedding, top_k=top_k)
         
-        # Normalize stored embeddings (row-wise)
-        norms = np.linalg.norm(self._embeddings, axis=1, keepdims=True)
-        normalized_embeddings = self._embeddings / norms
-        
-        # Compute cosine similarities
-        similarities = np.dot(normalized_embeddings, query_norm)
-        
-        # Get top-k indices
-        top_indices = np.argsort(similarities)[::-1][:top_k]
-        
-        # Filter by threshold and return results
-        results = []
-        for idx in top_indices:
-            score = float(similarities[idx])
-            if score >= threshold:
-                results.append((self._bet_ids[idx], score))
-        
-        return results
+        # Filter by threshold
+        return [(bet_id, score) for bet_id, score in results if score >= threshold]
     
     def hybrid_search(
         self,
@@ -445,9 +484,10 @@ class Database:
         """
         Hybrid search combining semantic similarity with structured filters.
         
-        First applies structured filters, then ranks by semantic similarity.
+        Uses FAISS filtered search for efficiency - SQL filter first,
+        then vector search only on matching IDs.
         """
-        # Get filtered bets
+        # Get filtered bets via SQL
         filtered_bets = self.advanced_filter(**filters)
         
         if not filtered_bets:
@@ -456,38 +496,75 @@ class Database:
         # Get bet IDs that passed the filter
         filtered_ids = {bet.bet_id for bet in filtered_bets}
         
-        # Get semantic scores for filtered bets only
-        if self._embeddings is None:
+        # Ensure embeddings are loaded
+        if self._vector_store.size() == 0:
             self.load_embeddings_to_memory()
         
-        if self._embeddings is None:
+        if self._vector_store.size() == 0:
             # No embeddings, return filtered results without scores
             return [
                 RetrievalResult(bet=bet, score=None, match_type="filtered")
                 for bet in filtered_bets[:top_k]
             ]
         
-        # Compute similarities for filtered bets only
-        query_norm = query_embedding / np.linalg.norm(query_embedding)
+        # Use FAISS filtered search - efficient for any filter size
+        search_results = self._vector_store.search(
+            query_embedding, 
+            top_k=top_k, 
+            filter_ids=filtered_ids
+        )
         
+        # Build result objects
+        bet_map = {bet.bet_id: bet for bet in filtered_bets}
         results = []
-        for i, bet_id in enumerate(self._bet_ids):
-            if bet_id in filtered_ids:
-                embedding = self._embeddings[i]
-                embedding_norm = embedding / np.linalg.norm(embedding)
-                score = float(np.dot(embedding_norm, query_norm))
-                
-                # Find the corresponding bet object
-                bet = next(b for b in filtered_bets if b.bet_id == bet_id)
+        for bet_id, score in search_results:
+            if bet_id in bet_map:
                 results.append(RetrievalResult(
-                    bet=bet,
+                    bet=bet_map[bet_id],
                     score=score,
                     match_type="hybrid"
                 ))
         
-        # Sort by score and return top_k
-        results.sort(key=lambda x: x.score or 0, reverse=True)
-        return results[:top_k]
+        return results
+    
+    def find_stale_embeddings(self) -> List[str]:
+        """
+        Find bets whose embeddings are stale due to document content changes.
+        
+        This checks the content_hash stored with each embedding against
+        the current document representation. If they differ, the embedding
+        is stale and should be regenerated.
+        
+        Returns:
+            List of bet_ids that need re-embedding
+        """
+        stale_ids = []
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get all bets with their current documents and stored hashes
+            cursor.execute("""
+                SELECT b.bet_id, b.document, e.content_hash
+                FROM bets b
+                LEFT JOIN embeddings e ON b.bet_id = e.bet_id
+            """)
+            
+            for row in cursor.fetchall():
+                bet_id = row["bet_id"]
+                document = row["document"]
+                stored_hash = row["content_hash"]
+                
+                if stored_hash is None:
+                    # No embedding exists
+                    stale_ids.append(bet_id)
+                else:
+                    # Check if content changed
+                    current_hash = compute_content_hash(document)
+                    if current_hash != stored_hash:
+                        stale_ids.append(bet_id)
+        
+        return stale_ids
     
     # ==================== HELPER METHODS ====================
     
