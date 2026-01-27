@@ -329,7 +329,8 @@ class TestRAGFormatting:
             RetrievalResult(bet=sample_bets[1])
         ]
         
-        context = assistant._format_context(results, "test query", include_aggregations=True)
+        # Use the new method
+        context = assistant._format_bet_records(results, max_rows=10)
         
         # Check that bet IDs are present
         assert "B0001" in context
@@ -714,3 +715,104 @@ class TestIDNormalization:
         # B00001 should extract and normalize to B0001
         ids = retriever._extract_all_bet_ids("Show bet B00001")
         assert ids == ["B0001"]
+
+
+# =============================================================================
+# Query Parser Tests
+# =============================================================================
+
+class TestQueryParser:
+    """Tests for the unified query parser."""
+    
+    def test_parse_bet_id(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Standard bet ID
+        parsed = parser.parse("Show bet B0001")
+        assert parsed.bet_ids == ["B0001"]
+        assert parsed.query_type.value == "entity_lookup"
+    
+    def test_parse_customer_id(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Standard customer ID
+        parsed = parser.parse("Show customer C029 bets")
+        assert parsed.customer_ids == ["C029"]
+        assert parsed.query_type.value == "entity_lookup"
+    
+    def test_parse_top_n_stake(self):
+        from src.query_parser import get_query_parser, AggregationType
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Top 5 highest stake bets")
+        assert parsed.sort_by == "stake_gbp"
+        assert parsed.sort_order == "desc"
+        assert parsed.limit == 5
+        assert parsed.aggregation == AggregationType.TOP_N
+    
+    def test_parse_top_n_delay(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Highest delay tennis bets")
+        assert parsed.sort_by == "price_delay_ms"
+        assert parsed.filters.get("sport") == "tennis"
+    
+    def test_parse_aggregate_count(self):
+        from src.query_parser import get_query_parser, AggregationType
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("How many football bets?")
+        assert parsed.aggregation == AggregationType.COUNT
+        assert parsed.filters.get("sport") == "football"
+    
+    def test_parse_filter_status(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Show REJECTED bets")
+        assert parsed.filters.get("status") == "REJECTED"
+    
+    def test_parse_filter_incident(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Bets with LATENCY_SPIKE")
+        assert parsed.filters.get("incident_tag") == "LATENCY_SPIKE"
+    
+    def test_parse_invalid_customer_id(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Show customer F029 bets")
+        assert parsed.invalid_entity_reference is not None
+        assert "f029" in parsed.invalid_entity_reference
+    
+    def test_parse_invalid_bet_id(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Show bet X123")
+        assert parsed.invalid_entity_reference is not None
+        assert "x123" in parsed.invalid_entity_reference
+    
+    def test_parse_combined_filters(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Top 3 REJECTED tennis bets by delay")
+        assert parsed.filters.get("sport") == "tennis"
+        assert parsed.filters.get("status") == "REJECTED"
+        assert parsed.limit == 3

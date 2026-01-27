@@ -460,3 +460,71 @@ Retrieved 0 bet(s) for context
 
 ⚠ The answer may be incomplete due to insufficient evidence.
 ```
+
+
+
+```bash
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py ask "What are the last 3 bets for C068" --show-context
+
+Question: What are the last 3 bets for C068
+
+SQL Statistics (authoritative):
+============================================================
+COMPUTED FACTS (pre-calculated, DO NOT recalculate)
+============================================================
+Customer: C068
+
+• Total Bets: 4
+• Total Stake: £115.00
+• Average Stake: £28.75
+• Average Delay: 236ms
+• Maximum Delay: 312ms
+• Status Breakdown: {'SETTLED': 4}
+
+⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE
+============================================================
+Retrieved Bets (4 shown):
+┏━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┓
+┃ Bet ID ┃ Customer ┃ Event                  ┃ Status  ┃ Incident ┃ Delay ┃
+┡━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━┩
+│ B0003  │ C068     │ PSG vs Marsielle       │ SETTLED │ NONE     │ 290ms │
+│ B0018  │ C068     │ Brighton vs Wolvees    │ SETTLED │ NONE     │ 222ms │
+│ B0019  │ C068     │ Man Citeh vs Brantford │ SETTLED │ NONE     │ 121ms │
+│ B0055  │ C068     │ Raducanu vs Pegulla    │ SETTLED │ NONE     │ 312ms │
+└────────┴──────────┴────────────────────────┴─────────┴──────────┴───────┘
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ Here are the last 3 bets for C068:                                                                                                                                │
+│                                                                                                                                                                   │
+│ - Bet ID B0055 — Sport: tennis; Event: Raducanu vs Pegulla; Market: Total Games O/U 21.5; Selection: Over 21.5; Stake: £40.00; Status: SETTLED; Incident: NONE;   │
+│ Price Delay: 312ms.                                                                                                                                               │
+│ - Bet ID B0019 — Sport: football; Event: Man Citeh vs Brantford; Market: Over/Under 2.5; Selection: Under 2.5; Stake: £20.00; Status: SETTLED; Incident: NONE;    │
+│ Price Delay: 121ms.                                                                                                                                               │
+│ - Bet ID B0018 — Sport: football; Event: Brighton vs Wolvees; Market: Match Winner; Selection: Brighton; Stake: £15.00; Status: SETTLED; Incident: NONE; Price    │
+│ Delay: 222ms.                                                                                                                                                     │
+│                                                                                                                                                                   │
+│ Evidence: [B0055, B0019, B0018]                                                                                                                                   │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0055, B0019, B0018
+Retrieved 4 bet(s) for context
+```
+
+
+```bash
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py search --method exact "B42"                
+
+Query: B42
+Method: exact
+
+Found 1 result(s)
+
+                                                           Retrieved Bets                                                            
+┏━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━┓
+┃ Bet ID ┃ Customer ┃ Sport    ┃ Event               ┃ Market         ┃ Selection ┃ Stake ┃ Status  ┃ Incident ┃ Delay (ms) ┃ Score ┃
+┡━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━┩
+│ B0042  │ C048     │ football │ Man Utd vs Newcatle │ Asian Handicap │ Away +0.5 │   £25 │ SETTLED │ NONE     │        110 │ 1.000 │
+└────────┴──────────┴──────────┴─────────────────────┴────────────────┴───────────┴───────┴─────────┴──────────┴────────────┴───────┘
+
+Evidence: B0042
+```
