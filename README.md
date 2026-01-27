@@ -1,497 +1,602 @@
 # Sportsbook RAG Assistant
 
-A Retrieval-Augmented Generation (RAG) system for querying sports betting data using natural language.
+A Retrieval-Augmented Generation (RAG) system for querying sports betting records using natural language. Built with a hybrid architecture combining structured SQL queries, semantic vector search, and LLM-powered response generation.
 
-## Overview
+## Table of Contents
 
-This assistant helps ops teams query bet records using a **unified query pipeline** that combines:
-- **Structured queries**: Exact lookups, filtering, aggregations, and rankings via SQL
-- **Semantic search**: Embedding-based similarity search using OpenAI's text-embedding-3-small
-- **Hybrid search**: SQL filtering + semantic ranking for complex queries
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Architecture Overview](#architecture-overview)
+- [Query Pipeline](#query-pipeline)
+- [Design Decisions](#design-decisions)
+- [Database Schema](#database-schema)
+- [Configuration](#configuration)
+- [CLI Reference](#cli-reference)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
 
-## Architecture
+---
+
+## Features
+
+- **Natural Language Queries**: Ask questions like "Show me all VOID bets with FEED_OUTAGE incidents"
+- **Hybrid Search**: Combines SQL filtering with semantic vector search
+- **Typo-Tolerant Team Search**: Phonetic normalization handles misspellings ("Raptors" → "Rapters")
+- **SQL-Based Computation**: All arithmetic performed via SafeCalculator (LLMs don't do math)
+- **Citation Enforcement**: Every answer includes evidence with bet IDs
+- **Analysis Mode**: Detects when users want summaries vs. simple counts
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.10+
+- OpenAI API key
+
+### Installation
+
+```bash
+# Clone and setup
+cd sportsbook-rag
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure API key
+cp .env.example .env
+# Edit .env and add your OPENAI_API_KEY
+```
+
+### Usage
+
+```bash
+# 1. Ingest data (generates embeddings)
+python main.py ingest
+
+# 2. Ask questions
+python main.py ask "How many bets were rejected?"
+python main.py ask "Show all bets for customer C068" --show-context
+python main.py ask "Find bets involving the Lakers team"
+
+# 3. Interactive mode
+python main.py chat
+```
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           SPORTSBOOK RAG SYSTEM                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  User Query                                                                  │
+│      │                                                                       │
+│      ▼                                                                       │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
+│  │ QueryParser  │────▶│QueryExecutor │────▶│    RAG       │                │
+│  │              │     │              │     │  Assistant   │                │
+│  │ • Entity IDs │     │ • Routing    │     │              │                │
+│  │ • Filters    │     │ • SQL/Vector │     │ • Context    │                │
+│  │ • Aggregates │     │ • Calculator │     │ • LLM Call   │                │
+│  │ • Intent     │     │              │     │ • Citations  │                │
+│  └──────────────┘     └──────────────┘     └──────────────┘                │
+│                              │                     │                        │
+│                              ▼                     ▼                        │
+│                       ┌─────────────┐       ┌─────────────┐                │
+│                       │  Database   │       │   OpenAI    │                │
+│                       │             │       │             │                │
+│                       │ • SQLite    │       │ • Embeddings│                │
+│                       │ • FAISS     │       │ • GPT-4     │                │
+│                       │ • Bets      │       │             │                │
+│                       │ • Embeddings│       │             │                │
+│                       └─────────────┘       └─────────────┘                │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Core Components
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| **QueryParser** | `query_parser.py` | Extracts entities, filters, aggregations from natural language |
+| **QueryExecutor** | `query_executor.py` | Routes queries and orchestrates retrieval strategies |
+| **Retriever** | `retrieval.py` | Hybrid search (SQL + semantic), embedding generation |
+| **Database** | `database.py` | SQLite storage, FAISS vector indices, query execution |
+| **SafeCalculator** | `calculator.py` | SQL-based arithmetic (counts, sums, averages) |
+| **RAGAssistant** | `rag.py` | Context building, LLM calls, citation enforcement |
+| **VectorStore** | `vector_store.py` | FAISS index management, similarity search |
+
+---
+
+## Query Pipeline
+
+### 1. Query Parsing
+
+The `QueryParser` analyzes natural language to extract structured information:
+
+```python
+"Show rejected bets for customer C068 with stake > £50"
+    ↓
+ParsedQuery(
+    customer_ids=["C068"],
+    filters={"status": "REJECTED"},
+    min_stake=50.0,
+    aggregation=AggregationType.NONE,
+    query_type=QueryType.ENTITY_LOOKUP
+)
+```
+
+**Extraction Capabilities:**
+- Entity IDs: `B0042`, `C068` (with normalization: `B42` → `B0042`)
+- Status filters: `SETTLED`, `PENDING`, `VOID`, `REJECTED`
+- Incident filters: `LATENCY_SPIKE`, `FEED_OUTAGE`, `MARKET_SUSPENDED`, `MANUAL_REVIEW`
+- Numeric ranges: `stake > £50`, `delay > 1000ms`
+- Aggregations: `count`, `sum`, `average`, `top N`, `bottom N`
+- Sort criteria: `highest stake`, `most delayed`
+
+### 2. Query Routing
+
+The `QueryExecutor` routes queries to the optimal execution strategy:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         CLI Interface                           │
-│               (ask, chat, search, filter, stats)                │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Unified Query Pipeline                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
-│  │   Query     │  │   Query     │  │   LLM Generation        │ │
-│  │   Parser    │→ │  Executor   │→ │   (GPT-5-mini)          │ │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
-│         ↓                ↓                                      │
-│   ParsedQuery      ExecutionResult                              │
-│   - bet_ids        - results                                    │
-│   - filters        - stats_context                              │
-│   - sort/limit     - execution_path                             │
-│   - aggregation                                                 │
-└─────────────────────────────────────────────────────────────────┘
-                               │
-        ┌──────────────────────┼──────────────────────┐
-        ▼                      ▼                      ▼
-┌───────────────┐    ┌─────────────────┐    ┌───────────────┐
-│  SQL Path     │    │  Semantic Path  │    │  Hybrid Path  │
-│  - Lookups    │    │  - Embeddings   │    │  SQL Filter + │
-│  - Filters    │    │  - Similarity   │    │  Semantic Rank│
-│  - Top N      │    │    Search       │    │               │
-│  - Aggregates │    │                 │    │               │
-└───────────────┘    └─────────────────┘    └───────────────┘
-        │                      │                      │
-        └──────────────────────┴──────────────────────┘
-                               │
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Infrastructure Layer                          │
-│  ┌───────────────┐  ┌───────────────┐  ┌───────────────────┐   │
-│  │ Database      │  │ Embedding     │  │ SafeCalculator    │   │
-│  │ (SQLite +     │  │ Service       │  │ (SQL-based math)  │   │
-│  │  VectorStore) │  │ (cached)      │  │                   │   │
-│  └───────────────┘  └───────────────┘  └───────────────────┘   │
+│                      QUERY TYPE ROUTING                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Has bet_id/customer_id?                                        │
+│      YES → ENTITY_LOOKUP (direct SQL lookup)                    │
+│                                                                  │
+│  Has aggregation (count/sum/avg)?                               │
+│      With filters → AGGREGATE (SQL with SafeCalculator)         │
+│      With semantic terms → SEMANTIC (vector search)             │
+│                                                                  │
+│  Has TOP_N/BOTTOM_N?                                            │
+│      With sort column → TOP_N (SQL ORDER BY)                    │
+│      Otherwise → HYBRID                                          │
+│                                                                  │
+│  Has filters + semantic terms?                                   │
+│      → HYBRID (SQL filter + vector rerank)                      │
+│                                                                  │
+│  Has filters only?                                               │
+│      → FILTERED (pure SQL)                                       │
+│                                                                  │
+│  Default?                                                        │
+│      → SEMANTIC (vector search with team embeddings)            │
+│                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Query Pipeline Workflow
+### 3. Retrieval Strategies
 
-1. **Query Parser** (`query_parser.py`): Parses natural language into structured `ParsedQuery`
-   - Extracts bet IDs, customer IDs
-   - Identifies filters (sport, status, incident)
-   - Detects sorting (top/bottom, by column)
-   - Identifies aggregation type (count, sum, avg, top_n)
-   - Flags invalid entity references
+#### SQL-Based Retrieval
+```python
+# Direct lookups and filtered queries
+SELECT * FROM bets WHERE customer_id = 'C068' AND status = 'REJECTED'
+```
 
-2. **Query Executor** (`query_executor.py`): Executes `ParsedQuery` using optimal strategy
-   - `ENTITY_LOOKUP`: Direct SQL lookup by ID
-   - `FILTERED`: SQL WHERE clause
-   - `AGGREGATE`: SQL aggregation functions
-   - `TOP_N`: SQL ORDER BY + LIMIT
-   - `SEMANTIC`: Embedding similarity search
-   - `HYBRID`: SQL filter + semantic ranking
+#### Semantic Vector Search
+```python
+# Team-level embeddings with phonetic normalization
+query = "Raptors"
+    ↓ phonetic_normalize()
+"RPTRS"
+    ↓ embed()
+query_vector
+    ↓ FAISS search against team1/team2 embeddings
+matches "Rapters" (stored as "RPTRS" embedding)
+```
 
-3. **LLM Generation**: Generates human-readable answer with citations
+#### Hybrid Search
+```python
+# SQL filter first, then semantic rerank
+1. SQL: Get all REJECTED bets
+2. Vector: Rerank by similarity to "suspicious activity"
+3. Return top-k results
+```
 
-### Supported Query Types
+### 4. Computation (SafeCalculator)
 
-| Query Example | Parsed As | Execution Path |
-|---------------|-----------|----------------|
-| "Show bet B0042" | entity_lookup | SQL lookup |
-| "Customer C029 bets" | entity_lookup | SQL lookup |
-| "Top 5 highest stake bets" | top_n | SQL ORDER BY stake DESC |
-| "Highest delay tennis bets" | top_n + filter | SQL WHERE sport='tennis' ORDER BY delay |
-| "How many football bets?" | aggregate + filter | SQL COUNT WHERE sport='football' |
-| "REJECTED bets" | filtered | SQL WHERE status='REJECTED' |
-| "Bets with pricing issues" | semantic | Embedding search |
-| "Suspicious tennis bets" | hybrid | SQL filter + semantic rank |
+**Critical Design**: LLMs cannot reliably perform arithmetic. All calculations use SQL:
+
+```python
+# SafeCalculator generates SQL for all numeric operations
+"What's the average stake for VOID bets?"
+    ↓
+SELECT AVG(stake_gbp), COUNT(*), SUM(stake_gbp) 
+FROM bets WHERE status = 'VOID'
+    ↓
+COMPUTED FACTS (injected into LLM context):
+• Total Bets: 5
+• Total Stake: £135.00
+• Average Stake: £27.00
+```
+
+### 5. Response Generation
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    RESPONSE GENERATION                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. Build Context                                                │
+│     • COMPUTED FACTS (from SafeCalculator)                      │
+│     • Bet records (formatted for LLM)                           │
+│     • Instructions based on query type                          │
+│                                                                  │
+│  2. Detect Analysis Intent                                       │
+│     Keywords: summarize, explain, analyze, what happened...     │
+│     → Triggers detailed response mode                           │
+│                                                                  │
+│  3. LLM Call                                                     │
+│     • System prompt (field meanings, rules)                     │
+│     • User message (question + context + instructions)          │
+│                                                                  │
+│  4. Citation Enforcement                                         │
+│     • Extract bet IDs from response                             │
+│     • Validate against retrieved bets                           │
+│     • Append "Evidence: [B0001, B0002, ...]"                    │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Design Decisions
+
+### 1. Team-Level Embeddings with Phonetic Normalization
+
+**Problem**: Event names like "Bulls vs Rapters" dilute team signal when embedded as one string. Users searching for "Raptors" (correct spelling) wouldn't match "Rapters" (data typo).
+
+**Solution**: Three-tier embedding strategy:
+
+```
+Event: "Bulls vs Rapters"
+           │
+           ▼ parse_event_teams()
+    ┌──────┴──────┐
+    │             │
+ "Bulls"     "Rapters"
+    │             │
+    ▼             ▼
+phonetic_normalize()
+    │             │
+ "BLS"       "RPTRS"
+    │             │
+    ▼             ▼
+ embed()      embed()
+    │             │
+    ▼             ▼
+team1_emb   team2_emb   ← Stored in DB
+```
+
+**Search Flow**:
+```
+Query: "Raptors"
+    ↓ phonetic_normalize()
+"RPTRS"
+    ↓ embed()
+query_vector
+    ↓ compare against team2_emb
+EXACT MATCH with "Rapters"!
+```
+
+**Phonetic Algorithm**:
+```python
+def phonetic_normalize(text):
+    # 1. Keep first letter
+    # 2. Remove vowels from rest
+    # 3. Remove consecutive duplicates
+    # 4. Apply phonetic rules (PH→F, CK→K, etc.)
+    
+    "Raptors"  → "RPTRS"
+    "Rapters"  → "RPTRS"  ← Same!
+    "Lakers"   → "LKRS"
+    "Lakkers"  → "LKRS"   ← Same!
+```
+
+### 2. SQL-Based Computation (No LLM Math)
+
+**Problem**: LLMs hallucinate arithmetic. "Count these 7 items" might return 6 or 8.
+
+**Solution**: `SafeCalculator` executes all math via SQL:
+
+```python
+class SafeCalculator:
+    def compute_stats(self, filters):
+        # ALL arithmetic happens in SQLite
+        query = """
+            SELECT 
+                COUNT(*) as total_bets,
+                SUM(stake_gbp) as total_stake,
+                AVG(stake_gbp) as avg_stake,
+                AVG(price_delay_ms) as avg_delay
+            FROM bets
+            WHERE {filters}
+        """
+        return self.execute(query)
+```
+
+**Result**: LLM receives pre-computed facts:
+```
+COMPUTED FACTS (pre-calculated, DO NOT recalculate)
+• Total Bets: 7
+• Total Stake: £190.00
+• Average Stake: £27.14
+⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE
+```
+
+### 3. Query Type Detection with Analysis Intent
+
+**Problem**: "How many VOID bets?" vs "How many VOID bets? List them and explain." require different response styles.
+
+**Solution**: Two-phase detection:
+
+```python
+# Phase 1: Query Type (structural)
+if has_bet_id: return ENTITY_LOOKUP
+if has_aggregation + filters: return AGGREGATE
+if has_top_n: return TOP_N
+...
+
+# Phase 2: Analysis Intent (semantic)
+analysis_keywords = ['summarize', 'explain', 'analyze', 'list them', 
+                     'what happened', 'highlight', 'severely']
+
+if any(kw in query.lower() for kw in analysis_keywords):
+    # Switch to detailed response mode
+    instruction = "ANALYZE each bet record..."
+else:
+    # Keep concise
+    instruction = "State the count only..."
+```
+
+### 4. Hybrid Search Strategy
+
+**Problem**: Pure SQL misses semantic queries. Pure vector search ignores structured filters.
+
+**Solution**: Combine both based on query type:
+
+```python
+def hybrid_search(query, filters):
+    # 1. SQL filter (fast, precise)
+    candidates = sql_filter(filters)  # e.g., status='REJECTED'
+    
+    # 2. If no candidates or need semantic ranking
+    if semantic_terms:
+        query_emb = embed(query)
+        # Rerank candidates by semantic similarity
+        results = rerank_by_similarity(candidates, query_emb)
+    
+    return results
+```
+
+### 5. Citation Enforcement
+
+**Problem**: LLM might reference bets not in context, or forget to cite sources.
+
+**Solution**: Post-processing enforcement:
+
+```python
+def enforce_citations(answer, retrieved_bets):
+    # Extract cited bet IDs
+    cited = re.findall(r'B\d{4}', answer)
+    valid_ids = {b.bet_id for b in retrieved_bets}
+    
+    # Filter to only valid citations
+    valid_citations = [id for id in cited if id in valid_ids]
+    
+    # Ensure Evidence line exists
+    if "Evidence:" not in answer:
+        answer += f"\n\nEvidence: [{', '.join(valid_citations)}]"
+    
+    return answer
+```
+
+---
+
+## Database Schema
+
+### Bets Table
+```sql
+CREATE TABLE bets (
+    bet_id TEXT PRIMARY KEY,      -- e.g., "B0042"
+    customer_id TEXT NOT NULL,    -- e.g., "C068"
+    sport TEXT NOT NULL,          -- football, tennis, basketball
+    event_name TEXT NOT NULL,     -- "Bulls vs Rapters"
+    market TEXT,                  -- "Moneyline", "Spread", etc.
+    selection TEXT,               -- "Home", "Away", "Over 2.5"
+    stake_gbp REAL NOT NULL,      -- Stake in GBP
+    status TEXT NOT NULL,         -- SETTLED, PENDING, VOID, REJECTED
+    incident_tag TEXT,            -- NONE, LATENCY_SPIKE, FEED_OUTAGE, etc.
+    price_delay_ms INTEGER,       -- Latency in milliseconds
+    document TEXT                 -- Full text for semantic search
+)
+```
+
+### Embeddings Table
+```sql
+CREATE TABLE embeddings (
+    bet_id TEXT PRIMARY KEY,
+    embedding BLOB NOT NULL,        -- Full document embedding (1536 dim)
+    team1_embedding BLOB,           -- First team/player phonetic embedding
+    team2_embedding BLOB,           -- Second team/player phonetic embedding
+    content_hash TEXT,              -- For change detection
+    FOREIGN KEY (bet_id) REFERENCES bets(bet_id)
+)
+```
+
+### Indices
+```sql
+CREATE INDEX idx_customer ON bets(customer_id);
+CREATE INDEX idx_status ON bets(status);
+CREATE INDEX idx_sport ON bets(sport);
+CREATE INDEX idx_incident ON bets(incident_tag);
+```
+
+---
+
+## Configuration
+
+### Environment Variables (`.env`)
+
+```bash
+# Required
+OPENAI_API_KEY=sk-...
+
+# Optional (defaults shown)
+EMBEDDING_MODEL=text-embedding-3-small
+LLM_MODEL=gpt-4o-mini
+DATABASE_PATH=data/bets.db
+CSV_PATH=data/bets.csv
+```
+
+### Application Settings (`config.py`)
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `EMBEDDING_DIMENSIONS` | 1536 | Vector dimensions for text-embedding-3-small |
+| `DEFAULT_TOP_K` | 10 | Default number of results to retrieve |
+| `SIMILARITY_THRESHOLD` | 0.3 | Minimum cosine similarity for semantic matches |
+
+---
+
+## CLI Reference
+
+### Ingest Data
+```bash
+python main.py ingest [--csv PATH]
+
+# Generates:
+# - Document embeddings (full bet description)
+# - Team1 embeddings (phonetic normalized)
+# - Team2 embeddings (phonetic normalized)
+```
+
+### Ask Questions
+```bash
+python main.py ask "your question" [OPTIONS]
+
+Options:
+  --top-k N        Number of results (default: 10)
+  --show-context   Display retrieved bets and stats
+```
+
+### Interactive Chat
+```bash
+python main.py chat
+
+# Commands in chat:
+# /help     - Show available commands
+# /clear    - Clear conversation
+# /quit     - Exit
+```
+
+### Database Stats
+```bash
+python main.py stats
+
+# Shows:
+# - Total bets
+# - Bets by status
+# - Bets by incident
+# - Embedding info
+```
+
+---
+
+## Testing
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run specific test file
+python -m pytest tests/test_retrieval.py -v
+
+# Run with coverage
+python -m pytest tests/ --cov=src --cov-report=html
+```
+
+### Test Categories
+
+| Test File | Coverage |
+|-----------|----------|
+| `test_retrieval.py` | Query parsing, ID normalization, filters, phonetic normalization |
+| `test_dimension_validation.py` | Embedding dimension checks |
+
+---
+
+## Troubleshooting
+
+### "No bets found" for valid queries
+
+1. **Check ingestion**: Ensure you ran `python main.py ingest`
+2. **Check filters**: Some filter combinations may have zero matches
+3. **Check spelling**: Team searches use phonetic matching, but very different spellings may not match
+
+### Empty or minimal LLM responses
+
+1. **Check API key**: Ensure `OPENAI_API_KEY` is set correctly
+2. **Check model**: Default model should work; try different models for better analysis
+3. **Increase tokens**: Modify `max_completion_tokens` in `rag.py` if responses are truncated
+
+### Embedding dimension mismatch
+
+```
+ValueError: Embedding dimension mismatch!
+  Stored: 1536, Expected: 3072
+```
+
+**Solution**: Delete database and re-ingest:
+```bash
+rm data/bets.db
+python main.py ingest
+```
+
+### FAISS not installed warning
+
+```
+Warning: FAISS not installed. Using brute-force search.
+```
+
+**Solution** (optional, for better performance):
+```bash
+pip install faiss-cpu
+```
+
+---
 
 ## Project Structure
 
 ```
-sportsbook-rag/
-├── .env.example          # Environment variable template
-├── requirements.txt      # Python dependencies
-├── README.md            # This file
-├── main.py              # CLI entry point
-├── src/
-│   ├── query_parser.py   # NEW: Unified query parsing
-│   ├── query_executor.py # NEW: Unified query execution
-│   ├── rag.py            # RAG orchestration (uses pipeline)
-│   ├── retrieval.py      # Low-level retrieval methods
-│   ├── database.py       # SQLite + VectorStore
-│   ├── calculator.py     # SQL-based calculations
-│   ├── embedding_service.py # Centralized embeddings (cached)
-│   ├── ingestion.py      # Data loading
-│   ├── models.py         # Data models
-│   └── config.py         # Configuration
-│   ├── __init__.py
-│   ├── config.py        # Configuration and settings
-│   ├── models.py        # Data models (Bet, RetrievalResult)
-│   ├── database.py      # SQLite + FAISS hybrid storage
-│   ├── vector_store.py  # FAISS-based vector storage with content hashing
-│   ├── ingestion.py     # CSV loading and embedding generation
-│   ├── retrieval.py     # Retrieval strategies
-│   ├── rag.py           # RAG generation with LLM
-│   └── cli.py           # Command-line interface
+BetTrace/
+├── main.py                 # CLI entry point
+├── requirements.txt        # Python dependencies
+├── .env.example           # Environment template
 ├── data/
-│   └── bets.csv         # Bet data (100 rows)
+│   ├── bets.csv           # Source data
+│   └── bets.db            # SQLite + embeddings (generated)
+├── src/
+│   ├── config.py          # Configuration management
+│   ├── models.py          # Data models (Bet, ParsedQuery)
+│   ├── database.py        # SQLite + FAISS operations
+│   ├── vector_store.py    # FAISS index wrapper
+│   ├── embedding_service.py # OpenAI embedding calls
+│   ├── ingestion.py       # CSV → DB + embeddings
+│   ├── query_parser.py    # NL → structured query
+│   ├── query_executor.py  # Query routing + execution
+│   ├── retrieval.py       # Search strategies
+│   ├── calculator.py      # SQL-based arithmetic
+│   ├── rag.py             # LLM response generation
+│   └── cli.py             # Command-line interface
 └── tests/
-    └── test_retrieval.py # Test suite
+    ├── test_retrieval.py
+    └── test_dimension_validation.py
 ```
 
-## Setup
-
-### 1. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure Environment
-
-Create a `.env` file from the template:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and add your OpenAI API key:
-
-```
-OPENAI_API_KEY=sk-your-api-key-here
-```
-
-### 3. Ingest Data
-
-```bash
-python main.py ingest
-```
-
-This will:
-- Load the CSV file (100 bets)
-- Generate embeddings via OpenAI API
-- Store data in SQLite database
-- Load embeddings into memory
-
-## Usage
-
-### Ask Questions (RAG)
-
-The main way to interact with the assistant - ask natural language questions:
-
-```bash
-# Single question
-python main.py ask "Why was bet B0004 rejected?"
-python main.py ask "Which customers were most impacted by LATENCY_SPIKE?"
-python main.py ask "Find the top 5 highest price_delay_ms bets and summarize"
-python main.py ask "For customer C068, summarize their bets and any incidents"
-
-# Show the retrieved context used
-python main.py ask "Why was B0004 rejected?" --show-context
-
-# Interactive chat session
-python main.py chat
-```
-
-### Search (Natural Language)
-
-```bash
-# Search using natural language
-python main.py search "Why was bet B0004 rejected?"
-python main.py search "Customer C068 bets"
-python main.py search "high latency bets" --top-k 10
-
-# Specify search method
-python main.py search "Lakers game" --method semantic
-python main.py search "B0042" --method exact
-```
-
-### Filter (Structured Queries)
-
-```bash
-# Filter by specific criteria
-python main.py filter --bet-id B0042
-python main.py filter --customer C068
-python main.py filter --status REJECTED
-python main.py filter --incident LATENCY_SPIKE
-python main.py filter --sport football
-python main.py filter --top-delay 5
-```
-
-### Incident Reports
-
-```bash
-# Generate incident summary
-python main.py incident-report LATENCY_SPIKE
-python main.py incident-report MARKET_SUSPENDED
-```
-
-### Statistics
-
-```bash
-# View database statistics
-python main.py stats
-```
-
-## Retrieval Strategies
-
-### 1. Exact Lookup
-Direct lookup by bet_id or customer_id. O(1) via indexed SQLite queries.
-
-```python
-retriever.get_bet("B0042")
-retriever.get_customer_bets("C068")
-```
-
-### 2. Filtered Queries
-SQL-based filtering on structured columns.
-
-```python
-retriever.filter_by_status("REJECTED")
-retriever.filter_by_incident("LATENCY_SPIKE")
-retriever.advanced_filter(
-    sports=["football"],
-    statuses=["SETTLED", "PENDING"],
-    min_stake=20.0
-)
-```
-
-### 3. Semantic Search
-Embedding-based similarity search for fuzzy matching.
-
-```python
-retriever.semantic_search("Lakers vs Celtics game", top_k=5)
-```
-
-### 4. Hybrid Search
-Combines structured filters with semantic ranking.
-
-```python
-retriever.hybrid_search(
-    query="high stakes basketball bets",
-    filters={"sports": ["basketball"], "min_stake": 30.0},
-    top_k=10
-)
-```
-
-### 5. Smart Retrieval
-Automatically chooses the best strategy based on query analysis.
-
-```python
-# Detects bet ID → exact lookup
-retriever.retrieve("Why was bet B0004 rejected?")
-
-# Detects customer ID → customer lookup
-retriever.retrieve("Show bets for customer C068")
-
-# Detects incident → filtered query
-retriever.retrieve("Which bets had LATENCY_SPIKE?")
-
-# No specific entity → semantic search
-retriever.retrieve("high value football bets with incidents")
-```
-
-## Data Model
-
-### Bet Record
-
-| Column | Type | Description |
-|--------|------|-------------|
-| bet_id | string | Unique identifier (e.g., B0042) |
-| customer_id | string | Customer identifier (e.g., C029) |
-| sport | string | football, tennis, basketball |
-| event_name | string | Match/fixture name |
-| market | string | Bet type (Match Winner, BTTS, etc.) |
-| selection | string | Selected outcome |
-| stake_gbp | float | Stake amount in GBP |
-| status | string | SETTLED, PENDING, VOID, REJECTED |
-| incident_tag | string | NONE, LATENCY_SPIKE, FEED_OUTAGE, etc. |
-| price_delay_ms | int | Latency in milliseconds |
-
-## Testing
-
-Run the test suite:
-
-```bash
-pytest tests/ -v
-```
-
-## Design Decisions & Tradeoffs
-
-### RAG System Design
-
-**Prompt Engineering**:
-The system prompt instructs the LLM to:
-- Only use information from provided bet records
-- Always cite bet_ids that support the answer
-- Explicitly state when evidence is insufficient
-- Focus on operational insights
-
-**Citation Extraction**:
-Citations are validated against retrieved bets to prevent hallucinated bet IDs.
-
-**Context Formatting**:
-Each bet is formatted with all fields clearly labeled, plus summary statistics when multiple bets are retrieved (status breakdown, incident counts, delay ranges).
-
-### Why Hybrid (Structured + Embeddings)?
-
-1. **Exact queries are common**: Ops teams often query by bet_id or customer_id
-2. **Fuzzy matching needed**: Event names contain misspellings (e.g., "Lakkers vs Celtcs")
-3. **Range queries**: Filtering by latency thresholds, stake amounts
-4. **Small dataset**: 100 rows fits comfortably in memory
-
-### Centralized EmbeddingService
-
-All embedding generation goes through a single `EmbeddingService` (`embedding_service.py`):
-
-```python
-from src.embedding_service import get_embedding_service
-
-service = get_embedding_service()  # Singleton - shared across app
-
-# Single text (cached)
-embedding = service.embed_text("some query")
-
-# Batch with caching + retry
-embeddings = service.embed_batch(["text1", "text2", ...])
-```
-
-**Features**:
-- **Singleton Pattern**: Single OpenAI client shared across Ingestion and Retrieval
-- **LRU Caching**: Avoids re-embedding identical texts (1000 entry cache)
-- **Exponential Backoff Retry**: Handles rate limits (429) and transient errors
-- **Batch Processing**: Efficient API calls with progress reporting
-
-**Why this matters**:
-- Before: Ingestion and Retriever each had their own OpenAI client and embedding logic
-- After: Single source of truth with consistent caching and error handling
-
-### Why SQLite + FAISS (Scalable Design)?
-
-The system uses a hybrid approach that scales from 100 to 100K+ rows:
-
-**FAISS Vector Store** (`vector_store.py`):
-- O(log N) approximate nearest neighbor search (vs O(N) brute force)
-- Filtered vector search without loading all data into Python
-- Falls back to NumPy if FAISS not installed
-
-**Embedding Versioning**:
-- Content hash stored with each embedding
-- Detects when document format changes require re-embedding
-- Prevents semantic drift between stored embeddings and current documents
-
-**Filtered Hybrid Search**:
-- SQL pre-filters bets (e.g., `sport='football'`)
-- FAISS searches only among filtered IDs
-- Avoids O(N) Python loop over all embeddings
-- Uses O(n+k) dict-based lookups, not O(n²) nested loops
-
-```python
-# Old (O(N) Python loop):
-for bet_id in all_bet_ids:
-    if bet_id in filtered_ids:
-        compute_similarity(embedding)
-
-# New (FAISS filtered search):
-vector_store.search(query, filter_ids=filtered_ids)  # O(log K) where K=filter size
-```
-
-**Design Decision - No Weighted Scoring**:
-We explicitly removed the unused `semantic_weight` parameter. The current ranking is:
-1. **With embeddings**: Pure semantic similarity (cosine) ranking
-2. **Without embeddings**: Explicit fallback to `bet_id DESC` (most recent first)
-
-If weighted scoring is needed in the future (e.g., combining semantic score with recency):
-```python
-# Future implementation would look like:
-final_score = semantic_weight * semantic_score + (1 - semantic_weight) * recency_score
-```
-This requires defining what the "recency_score" or "sql_score" means for your use case.
-
-### Document Representation
-
-Each bet is converted to a natural language document for embedding:
-
-```
-Bet B0004: Customer C060 placed a £30 BTTS bet on West Ham vs Fullham (football). 
-Selection: No. Status: REJECTED. Incident: MARKET_SUSPENDED. High latency: 635ms.
-```
-
-**Important**: The document text is stored in the database alongside the embedding. When retrieving bets for RAG:
-- The stored embedding is used for similarity search (no re-embedding)
-- The stored document text is returned (no re-generation)
-- This ensures the text sent to the LLM exactly matches what was embedded
-
-This allows semantic search to match concepts like "rejected bets" or "high latency incidents".
-
-### Currency Handling (No Float Precision Errors)
-
-Financial applications must avoid floating-point precision errors (e.g., `0.1 + 0.2 ≠ 0.3`).
-
-**Python Layer** (`models.py`):
-- All monetary values use `Decimal` for exact arithmetic
-- `to_decimal()` - converts any input safely to Decimal
-- `to_pence()` / `from_pence()` - for INTEGER storage
-
-```python
-from src.models import Bet, to_decimal
-
-# Creating bets - stake is always converted to Decimal
-bet = Bet.from_dict({"stake_gbp": 10.99, ...})
-print(type(bet.stake_gbp))  # <class 'decimal.Decimal'>
-
-# Arithmetic is exact
-total = bet1.stake_gbp + bet2.stake_gbp  # Returns Decimal
-```
-
-**Database Layer** (`database.py`):
-- Currently stores as `REAL` for backwards compatibility
-- For production: store as `INTEGER` pence (`bet.stake_pence()`)
-- Conversion happens at boundary in `_row_to_bet()`
-
-## Future Improvements
-
-With more time, I would add:
-
-1. **Query intent classification**: Use LLM to parse complex queries into structured filters
-2. **Re-ranking**: Two-stage retrieval with cross-encoder re-ranking
-3. **Caching**: Cache embeddings and frequent queries
-4. **Streaming**: Support larger datasets with chunked processing
-5. **Evaluation**: Build test set with ground truth for retrieval metrics
-
-## Key Design Decision: LLMs Do Not Do Math
-
-**Problem**: LLMs are notoriously bad at arithmetic. Asking them to count items, sum values, or calculate averages produces unreliable results.
-
-**Solution**: The `SafeCalculator` module (`src/calculator.py`) handles ALL numeric computations:
-
-```python
-# All calculations are executed via SQL (deterministic, exact)
-calculator = SafeCalculator(db_path)
-
-# Count, sum, average - all computed in SQL
-result = calculator.sum_stake(status="SETTLED")
-# Returns: CalculationResult(value=Decimal('2230.00'), sql_used="SELECT SUM...")
-
-# Rankings
-top_5 = calculator.top_by_delay(n=5)
-
-# Groupings
-by_status = calculator.group_by_status()
-```
-
-**How it works**:
-1. Query analysis determines what calculations are needed
-2. `SafeCalculator` executes calculations via parameterized SQL
-3. Results are formatted as **COMPUTED FACTS** in the LLM context
-4. LLM's job is ONLY to narrate and explain - never to calculate
-
-**Example context sent to LLM**:
-```
-============================================================
-COMPUTED FACTS (pre-calculated, DO NOT recalculate)
-============================================================
-Status: SETTLED
-
-• Total Bets: 80
-• Total Stake: £2230.00
-• Average Stake: £27.88
-
-⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE
-============================================================
-
-The bet records below are ONLY for citing evidence.
-```
-
-**Safety features**:
-- Only whitelisted columns allowed (no SQL injection)
-- All queries are parameterized
-- Read-only database connection
-- Uses Decimal for exact currency arithmetic
-6. **Web UI**: Flask/FastAPI endpoint with React frontend
-
-## License
-
-Internal use only - FDJ United
