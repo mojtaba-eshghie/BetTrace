@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Test embedding dimension validation."""
 
-# run simply with `python tests/test_dimension_validation.py`
-
 import tempfile
 from pathlib import Path
 import warnings
-# Add src to path
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.database import Database
 

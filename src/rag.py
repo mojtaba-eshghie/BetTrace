@@ -209,6 +209,18 @@ class RAGAssistant:
             results = self.retriever.get_top_by_delay(limit)
             return results, len(results)
         
+        # Check for general aggregate queries - return sample bets for citation
+        if self._is_general_aggregate_query(query):
+            # For general queries, return a sample of all bets
+            # The actual answer comes from COMPUTED FACTS, these are just for citation
+            all_bets = self.db.get_all_bets()
+            total_count = len(all_bets)
+            results = [
+                RetrievalResult(bet=bet, match_type="sample")
+                for bet in all_bets[:top_k]
+            ]
+            return results, total_count
+        
         # Default: semantic search (this is where top_k matters)
         results = self.retriever.retrieve(query, top_k=top_k)
         return results, len(results)
@@ -378,7 +390,65 @@ class RAGAssistant:
             lines.append("=" * 60)
             return "\n".join(lines)
         
+        # General aggregate queries (no specific filter)
+        # Matches: "how many bets", "total stake", "all bets", "overall", etc.
+        if self._is_general_aggregate_query(query):
+            lines.append("=" * 60)
+            lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
+            lines.append("=" * 60)
+            lines.append("Overall Statistics (All Bets)")
+            lines.append("")
+            
+            total_count = self.calculator.count_bets()
+            total_stake = self.calculator.sum_stake()
+            avg_stake = self.calculator.execute(CalculationRequest(
+                calc_type=CalculationType.AVG, column="stake_gbp"
+            ))
+            customers = self.calculator.customers_affected()
+            avg_delay = self.calculator.avg_delay()
+            status_breakdown = self.calculator.group_by_status()
+            incident_breakdown = self.calculator.group_by_incident()
+            
+            lines.append(f"• Total Bets: {total_count.value}")
+            lines.append(f"• Total Stake: £{total_stake.value}")
+            lines.append(f"• Average Stake: £{avg_stake.value:.2f}" if avg_stake.value else "• Average Stake: N/A")
+            lines.append(f"• Unique Customers: {customers.value}")
+            lines.append(f"• Average Delay: {avg_delay.value:.0f}ms" if avg_delay.value else "• Average Delay: N/A")
+            lines.append("")
+            lines.append("Status Breakdown:")
+            for status, data in status_breakdown.value.items():
+                lines.append(f"  • {status}: {data['count']} bets, £{data['total']} total")
+            lines.append("")
+            lines.append("Incident Breakdown:")
+            for incident, data in incident_breakdown.value.items():
+                lines.append(f"  • {incident}: {data['count']} bets")
+            lines.append("")
+            lines.append("⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE")
+            lines.append("=" * 60)
+            return "\n".join(lines)
+        
         return None
+    
+    def _is_general_aggregate_query(self, query: str) -> bool:
+        """
+        Detect if a query is asking for general aggregate statistics.
+        
+        Examples:
+        - "How many bets are there?"
+        - "What is the total stake?"
+        - "Give me an overview of all bets"
+        - "Summary of the data"
+        """
+        query_lower = query.lower()
+        
+        # Keywords indicating aggregate queries
+        aggregate_keywords = [
+            "how many", "total", "all bets", "overall", "summary",
+            "overview", "count", "sum", "average", "statistics",
+            "how much", "entire", "whole", "everything"
+        ]
+        
+        return any(keyword in query_lower for keyword in aggregate_keywords)
     
     def _extract_sport(self, query: str) -> Optional[str]:
         """Extract sport name from query."""
