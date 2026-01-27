@@ -816,3 +816,23 @@ class TestQueryParser:
         assert parsed.filters.get("sport") == "tennis"
         assert parsed.filters.get("status") == "REJECTED"
         assert parsed.limit == 3
+
+    def test_parse_delay_filter(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("How many rejected bets had delay > 500ms")
+        assert parsed.filters.get("status") == "REJECTED"
+        assert parsed.filters.get("min_delay") == 500
+        # Should NOT have a stake filter
+        assert "min_stake" not in parsed.filters
+    
+    def test_parse_stake_filter_with_pound(self):
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Bets with stake over £50")
+        assert parsed.filters.get("min_stake") == 50.0
+        assert "min_delay" not in parsed.filters

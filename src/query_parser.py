@@ -494,14 +494,25 @@ class QueryParser:
         filters = {}
         
         # "over £50", "more than 50", "above £100"
-        over_match = re.search(r'(?:over|above|more than|greater than|>=?)\s*£?(\d+(?:\.\d+)?)', text)
+        # But NOT "delay > 500ms" - exclude if followed by 'ms' or preceded by delay/latency keywords
+        over_match = re.search(r'(?:over|above|more than|greater than|>=?)\s*£(\d+(?:\.\d+)?)', text)
         if over_match:
             filters["min_stake"] = float(over_match.group(1))
+        else:
+            # Try without £ but make sure it's not a delay pattern
+            over_match = re.search(r'(?<!delay\s)(?<!latency\s)(?:over|above|more than|greater than)\s+(\d+(?:\.\d+)?)(?!ms)', text)
+            if over_match and 'delay' not in text.lower() and 'latency' not in text.lower():
+                filters["min_stake"] = float(over_match.group(1))
         
         # "under £50", "less than 50", "below £100"
-        under_match = re.search(r'(?:under|below|less than|<=?)\s*£?(\d+(?:\.\d+)?)', text)
+        under_match = re.search(r'(?:under|below|less than|<=?)\s*£(\d+(?:\.\d+)?)', text)
         if under_match:
             filters["max_stake"] = float(under_match.group(1))
+        else:
+            # Try without £ but make sure it's not a delay pattern
+            under_match = re.search(r'(?<!delay\s)(?<!latency\s)(?:under|below|less than)\s+(\d+(?:\.\d+)?)(?!ms)', text)
+            if under_match and 'delay' not in text.lower() and 'latency' not in text.lower():
+                filters["max_stake"] = float(under_match.group(1))
         
         return filters
     
@@ -509,15 +520,32 @@ class QueryParser:
         """Extract delay range filters."""
         filters = {}
         
-        # "delay over 1000ms", "latency > 500"
-        over_match = re.search(r'(?:delay|latency).*?(?:over|above|greater|>)\s*(\d+)', text)
-        if over_match:
-            filters["min_delay"] = int(over_match.group(1))
+        # Patterns for "delay > 500ms", "delay over 1000", "latency > 500"
+        # Also matches "had delay > 500ms"
+        over_patterns = [
+            r'delay\s*(?:>|>=|over|above|greater than)\s*(\d+)',
+            r'latency\s*(?:>|>=|over|above|greater than)\s*(\d+)',
+            r'(?:>|>=)\s*(\d+)\s*ms',
+        ]
         
-        # "delay under 100ms"
-        under_match = re.search(r'(?:delay|latency).*?(?:under|below|less|<)\s*(\d+)', text)
-        if under_match:
-            filters["max_delay"] = int(under_match.group(1))
+        for pattern in over_patterns:
+            over_match = re.search(pattern, text, re.IGNORECASE)
+            if over_match:
+                filters["min_delay"] = int(over_match.group(1))
+                break
+        
+        # Patterns for "delay < 100ms", "delay under 100"
+        under_patterns = [
+            r'delay\s*(?:<|<=|under|below|less than)\s*(\d+)',
+            r'latency\s*(?:<|<=|under|below|less than)\s*(\d+)',
+            r'(?:<|<=)\s*(\d+)\s*ms',
+        ]
+        
+        for pattern in under_patterns:
+            under_match = re.search(pattern, text, re.IGNORECASE)
+            if under_match:
+                filters["max_delay"] = int(under_match.group(1))
+                break
         
         return filters
     

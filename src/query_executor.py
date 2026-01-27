@@ -488,13 +488,21 @@ class QueryExecutor:
                 filter_parts.append(f"Status: {parsed.filters['status']}")
             if "incident_tag" in parsed.filters:
                 filter_parts.append(f"Incident: {parsed.filters['incident_tag']}")
+            if "min_delay" in parsed.filters:
+                filter_parts.append(f"Min Delay: {parsed.filters['min_delay']}ms")
+            if "max_delay" in parsed.filters:
+                filter_parts.append(f"Max Delay: {parsed.filters['max_delay']}ms")
+            if "min_stake" in parsed.filters:
+                filter_parts.append(f"Min Stake: £{parsed.filters['min_stake']}")
+            if "max_stake" in parsed.filters:
+                filter_parts.append(f"Max Stake: £{parsed.filters['max_stake']}")
             if filter_parts:
                 lines.append(f"Filters: {', '.join(filter_parts)}")
         else:
             lines.append("Scope: All Bets")
         lines.append("")
         
-        # Compute aggregates
+        # Compute aggregates with null safety
         count = self.calculator.count_bets(**calc_filters) if calc_filters else self.calculator.count_bets()
         total_stake = self.calculator.sum_stake(**calc_filters) if calc_filters else self.calculator.sum_stake()
         avg_stake = self.calculator.execute(CalculationRequest(
@@ -503,20 +511,23 @@ class QueryExecutor:
         customers = self.calculator.customers_affected(**calc_filters) if calc_filters else self.calculator.customers_affected()
         avg_delay = self.calculator.avg_delay(**calc_filters) if calc_filters else self.calculator.avg_delay()
         
-        lines.append(f"• Total Bets: {count.value}")
-        lines.append(f"• Total Stake: £{total_stake.value:.2f}")
-        lines.append(f"• Average Stake: £{avg_stake.value:.2f}" if avg_stake.value else "• Average Stake: N/A")
-        lines.append(f"• Unique Customers: {customers.value}")
-        lines.append(f"• Average Delay: {avg_delay.value:.0f}ms" if avg_delay.value else "• Average Delay: N/A")
+        # Format with null safety
+        lines.append(f"• Total Bets: {count.value if count.value is not None else 0}")
+        lines.append(f"• Total Stake: £{total_stake.value:.2f}" if total_stake.value is not None else "• Total Stake: £0.00")
+        lines.append(f"• Average Stake: £{avg_stake.value:.2f}" if avg_stake.value is not None else "• Average Stake: N/A")
+        lines.append(f"• Unique Customers: {customers.value if customers.value is not None else 0}")
+        lines.append(f"• Average Delay: {avg_delay.value:.0f}ms" if avg_delay.value is not None else "• Average Delay: N/A")
         lines.append("")
         
-        # Status breakdown
-        status_breakdown = self.calculator.group_by_status()
-        lines.append("Status Breakdown:")
-        for status, data in status_breakdown.value.items():
-            lines.append(f"  • {status}: {data['count']} bets, £{data['total']:.2f}")
+        # Status breakdown (only if we have filters that don't already filter by status)
+        if "status" not in parsed.filters:
+            status_breakdown = self.calculator.group_by_status()
+            if status_breakdown.value:
+                lines.append("Status Breakdown:")
+                for status, data in status_breakdown.value.items():
+                    lines.append(f"  • {status}: {data['count']} bets, £{data['total']:.2f}")
+                lines.append("")
         
-        lines.append("")
         lines.append("⚠️ USE THESE EXACT VALUES - DO NOT RECALCULATE")
         lines.append("=" * 60)
         
