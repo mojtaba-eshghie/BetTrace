@@ -133,17 +133,28 @@ class RAGAssistant:
         # Step 2: Compute SQL-based aggregations (ALWAYS on full dataset, not just top_k)
         stats_context = self._compute_sql_aggregations(query)
         
-        # Step 3: Format row context (limited to top_k for readability)
-        row_context = self._format_row_context(results, top_k)
+        # Step 3: Format context based on query type
+        is_aggregate = self._is_general_aggregate_query(query)
         
-        # Step 4: Combine contexts
-        context = self._build_full_context(row_context, stats_context, all_results_count, top_k)
+        if is_aggregate and stats_context:
+            # For aggregate queries: ONLY show computed facts, no bet records
+            # This prevents the LLM from listing individual bets
+            context = self._build_aggregate_context(stats_context, results, all_results_count)
+        else:
+            # For specific queries: show bet records for detail
+            row_context = self._format_row_context(results, top_k)
+            context = self._build_full_context(row_context, stats_context, all_results_count, top_k)
         
-        # Step 5: Generate answer
+        # Step 4: Generate answer
         answer = self._generate_answer(query, context)
         
-        # Step 6: Extract citations
+        # Step 6: Extract and enforce citations
         citations = self._extract_citations(answer, results)
+        answer = self._enforce_citations(answer, citations, results)
+        
+        # Re-extract citations in case we added them
+        if not citations and results:
+            citations = self._extract_citations(answer, results)
         
         # Step 7: Check if evidence was sufficient
         sufficient = not any(phrase in answer.lower() for phrase in [
@@ -493,6 +504,42 @@ class RAGAssistant:
         
         return "\n".join(lines)
     
+    def _build_aggregate_context(
+        self,
+        stats_context: str,
+        results: List[RetrievalResult],
+        total_count: int
+    ) -> str:
+        """
+        Build context for aggregate queries - ONLY computed facts, no bet records.
+        
+        This prevents the LLM from listing individual bets when asked for totals/summaries.
+        The LLM only sees:
+        1. The computed statistics
+        2. A list of bet IDs for citation (no details)
+        """
+        parts = []
+        
+        # Add computed facts (this is the ONLY data the LLM should use)
+        parts.append(stats_context)
+        parts.append("")
+        parts.append("─" * 60)
+        parts.append("ANSWER FORMAT FOR THIS AGGREGATE QUESTION:")
+        parts.append("• State the totals from COMPUTED FACTS above (1-3 sentences)")
+        parts.append("• DO NOT describe individual bets")
+        parts.append("• End with: Evidence: [sample bet IDs from list below]")
+        parts.append("─" * 60)
+        parts.append("")
+        
+        # Only provide bet IDs for citation - NO DETAILS
+        parts.append(f"Available bet IDs for citation ({total_count} total):")
+        bet_ids = [r.bet.bet_id for r in results[:10]]  # Just first 10 IDs
+        parts.append(", ".join(bet_ids))
+        if total_count > 10:
+            parts.append(f"... and {total_count - 10} more")
+        
+        return "\n".join(parts)
+    
     def _build_full_context(
         self, 
         row_context: str, 
@@ -737,6 +784,54 @@ Example bad answer: "Here are the bets: B0001 has £10..." (DO NOT DO THIS)"""
                 seen.add(bid)
         
         return citations
+    
+    def _enforce_citations(
+        self,
+        answer: str,
+        extracted_citations: List[str],
+        results: List[RetrievalResult]
+    ) -> str:
+        """
+        Enforce that the answer includes citations.
+        
+        Rules:
+        1. If LLM included "Evidence: ..." with valid citations → keep as-is
+        2. If LLM forgot citations but we have results → append Evidence line
+        3. If citations are in answer but not in Evidence format → append Evidence line
+        
+        This ensures citations are ALWAYS present when we have retrieved results.
+        """
+        import re
+        
+        if not results:
+            return answer
+        
+        # Check if answer already has a proper Evidence line
+        evidence_pattern = r'Evidence:\s*\[?([^\]]+)\]?'
+        has_evidence_line = bool(re.search(evidence_pattern, answer, re.IGNORECASE))
+        
+        # Get bet IDs from results for fallback
+        result_ids = [r.bet.bet_id for r in results]
+        
+        if extracted_citations and has_evidence_line:
+            # LLM did its job - keep the answer as-is
+            return answer
+        
+        # Determine which citations to use
+        if extracted_citations:
+            # LLM mentioned bet IDs in the answer but maybe not in Evidence format
+            citation_ids = extracted_citations
+        else:
+            # LLM forgot to cite - use the retrieved bet IDs
+            # Limit to first 5 to keep it readable
+            citation_ids = result_ids[:5]
+        
+        # Remove any malformed Evidence line and append a proper one
+        answer = re.sub(r'\n*Evidence:.*$', '', answer, flags=re.IGNORECASE | re.MULTILINE).strip()
+        
+        # Append proper Evidence line
+        evidence_line = f"\n\nEvidence: [{', '.join(citation_ids)}]"
+        return answer + evidence_line
     
     def interactive_session(self):
         """Run an interactive Q&A session."""
