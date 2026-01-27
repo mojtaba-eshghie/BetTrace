@@ -88,6 +88,9 @@ class Ingestion:
             
         Returns:
             NumPy array of embeddings (shape: [len(texts), EMBEDDING_DIMENSIONS])
+            
+        Raises:
+            ValueError: If the generated embeddings have unexpected dimensions
         """
         all_embeddings = []
         
@@ -107,7 +110,19 @@ class Ingestion:
             
             print(f"  → Generated embeddings for {min(i + batch_size, len(texts))}/{len(texts)} documents")
         
-        return np.array(all_embeddings, dtype=np.float32)
+        embeddings = np.array(all_embeddings, dtype=np.float32)
+        
+        # Validate dimension matches config
+        actual_dim = embeddings.shape[1]
+        if actual_dim != EMBEDDING_DIMENSIONS:
+            raise ValueError(
+                f"Embedding dimension mismatch!\n"
+                f"  Model '{EMBEDDING_MODEL}' produced: {actual_dim} dimensions\n"
+                f"  Config EMBEDDING_DIMENSIONS: {EMBEDDING_DIMENSIONS}\n"
+                f"  Solution: Update EMBEDDING_DIMENSIONS in config.py to {actual_dim}"
+            )
+        
+        return embeddings
     
     def ingest(
         self, 
@@ -125,30 +140,45 @@ class Ingestion:
             
         Returns:
             Number of bets ingested
+            
+        Raises:
+            ValueError: If embedding dimensions don't match stored config
         """
         print("\n" + "="*60)
         print("SPORTSBOOK RAG - DATA INGESTION")
         print("="*60)
         
+        # Step 0: Validate embedding config if not clearing
+        if not clear_existing and generate_embeddings:
+            stored_config = self.db.get_embedding_config()
+            if stored_config:
+                print(f"\n[0/4] Validating embedding config...")
+                self.db.validate_embedding_config(EMBEDDING_MODEL, EMBEDDING_DIMENSIONS)
+                print(f"✓ Config matches (model: {EMBEDDING_MODEL}, dim: {EMBEDDING_DIMENSIONS})")
+        
         # Step 1: Load CSV
-        print("\n[1/3] Loading CSV data...")
+        print("\n[1/4] Loading CSV data...")
         bets = self.load_csv(csv_path)
         
         # Step 2: Clear existing data if requested
         if clear_existing:
-            print("\n[2/3] Clearing existing database...")
+            print("\n[2/4] Clearing existing database...")
             self.db.clear()
             print("✓ Database cleared")
         
         # Step 3: Generate embeddings
         embeddings = None
         if generate_embeddings:
-            print("\n[3/3] Generating embeddings...")
+            print("\n[3/4] Generating embeddings...")
             documents = [bet.to_document() for bet in bets]
             embeddings = self.generate_embeddings(documents)
             print(f"✓ Generated {len(embeddings)} embeddings (dim={embeddings.shape[1]})")
+            
+            # Store embedding config for future validation
+            self.db.set_embedding_config(EMBEDDING_MODEL, embeddings.shape[1])
+            print(f"✓ Stored embedding config (model: {EMBEDDING_MODEL}, dim: {embeddings.shape[1]})")
         else:
-            print("\n[3/3] Skipping embedding generation")
+            print("\n[3/4] Skipping embedding generation")
         
         # Step 4: Store in database
         print("\n[4/4] Storing in database...")

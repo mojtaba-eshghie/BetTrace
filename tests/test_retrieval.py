@@ -478,3 +478,55 @@ class TestCalculator:
         ))
         # Only B0002 (2500ms)
         assert result.value == 1
+
+
+# =============================================================================
+# Embedding Dimension Validation Tests
+# =============================================================================
+
+class TestEmbeddingValidation:
+    """Tests for embedding dimension validation."""
+    
+    def test_metadata_storage(self, test_db):
+        """Test that embedding metadata can be stored and retrieved."""
+        test_db.set_embedding_config("test-model", 768)
+        
+        config = test_db.get_embedding_config()
+        assert config is not None
+        assert config["model"] == "test-model"
+        assert config["dimension"] == 768
+        assert "created_at" in config
+    
+    def test_validation_passes_when_matching(self, test_db):
+        """Test validation passes when dimensions match."""
+        test_db.set_embedding_config("text-embedding-3-small", 1536)
+        
+        # Should not raise
+        test_db.validate_embedding_config("text-embedding-3-small", 1536)
+    
+    def test_validation_fails_on_dimension_mismatch(self, test_db):
+        """Test validation fails when dimensions don't match."""
+        test_db.set_embedding_config("text-embedding-3-small", 1536)
+        
+        with pytest.raises(ValueError, match="dimension mismatch"):
+            test_db.validate_embedding_config("different-model", 768)
+    
+    def test_validation_warns_on_model_change(self, test_db):
+        """Test validation warns but doesn't fail when only model changes."""
+        import warnings
+        
+        test_db.set_embedding_config("old-model", 1536)
+        
+        # Should warn but not raise
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            test_db.validate_embedding_config("new-model", 1536)
+            
+            # Check that a warning was issued
+            assert len(w) == 1
+            assert "model changed" in str(w[0].message).lower()
+    
+    def test_no_validation_on_first_ingestion(self, test_db):
+        """Test that validation passes when no config is stored yet."""
+        # No config stored - should not raise
+        test_db.validate_embedding_config("any-model", 999)
