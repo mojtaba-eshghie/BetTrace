@@ -133,13 +133,19 @@ class RAGAssistant:
         # Step 2: Compute SQL-based aggregations (ALWAYS on full dataset, not just top_k)
         stats_context = self._compute_sql_aggregations(query)
         
-        # Step 3: Format row context (limited to top_k for readability)
-        row_context = self._format_row_context(results, top_k)
+        # Step 3: Format context based on query type
+        is_aggregate = self._is_general_aggregate_query(query)
         
-        # Step 4: Combine contexts
-        context = self._build_full_context(row_context, stats_context, all_results_count, top_k)
+        if is_aggregate and stats_context:
+            # For aggregate queries: ONLY show computed facts, no bet records
+            # This prevents the LLM from listing individual bets
+            context = self._build_aggregate_context(stats_context, results, all_results_count)
+        else:
+            # For specific queries: show bet records for detail
+            row_context = self._format_row_context(results, top_k)
+            context = self._build_full_context(row_context, stats_context, all_results_count, top_k)
         
-        # Step 5: Generate answer
+        # Step 4: Generate answer
         answer = self._generate_answer(query, context)
         
         # Step 6: Extract and enforce citations
@@ -497,6 +503,42 @@ class RAGAssistant:
             lines.append("")
         
         return "\n".join(lines)
+    
+    def _build_aggregate_context(
+        self,
+        stats_context: str,
+        results: List[RetrievalResult],
+        total_count: int
+    ) -> str:
+        """
+        Build context for aggregate queries - ONLY computed facts, no bet records.
+        
+        This prevents the LLM from listing individual bets when asked for totals/summaries.
+        The LLM only sees:
+        1. The computed statistics
+        2. A list of bet IDs for citation (no details)
+        """
+        parts = []
+        
+        # Add computed facts (this is the ONLY data the LLM should use)
+        parts.append(stats_context)
+        parts.append("")
+        parts.append("─" * 60)
+        parts.append("ANSWER FORMAT FOR THIS AGGREGATE QUESTION:")
+        parts.append("• State the totals from COMPUTED FACTS above (1-3 sentences)")
+        parts.append("• DO NOT describe individual bets")
+        parts.append("• End with: Evidence: [sample bet IDs from list below]")
+        parts.append("─" * 60)
+        parts.append("")
+        
+        # Only provide bet IDs for citation - NO DETAILS
+        parts.append(f"Available bet IDs for citation ({total_count} total):")
+        bet_ids = [r.bet.bet_id for r in results[:10]]  # Just first 10 IDs
+        parts.append(", ".join(bet_ids))
+        if total_count > 10:
+            parts.append(f"... and {total_count - 10} more")
+        
+        return "\n".join(parts)
     
     def _build_full_context(
         self, 
