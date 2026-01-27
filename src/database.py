@@ -89,6 +89,12 @@ class Database:
                 )
             """)
             
+            # Add content_hash column if it doesn't exist (migration)
+            cursor.execute("PRAGMA table_info(embeddings)")
+            columns = {row['name'] for row in cursor.fetchall()}
+            if 'content_hash' not in columns:
+                cursor.execute("ALTER TABLE embeddings ADD COLUMN content_hash TEXT")
+            
             # Create indexes for common queries
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_customer_id ON bets(customer_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sport ON bets(sport)")
@@ -399,9 +405,21 @@ class Database:
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(
-                "SELECT bet_id, embedding, content_hash FROM embeddings ORDER BY bet_id"
-            )
+            
+            # Check if content_hash column exists (backwards compatibility)
+            cursor.execute("PRAGMA table_info(embeddings)")
+            columns = {row['name'] for row in cursor.fetchall()}
+            has_content_hash = 'content_hash' in columns
+            
+            if has_content_hash:
+                cursor.execute(
+                    "SELECT bet_id, embedding, content_hash FROM embeddings ORDER BY bet_id"
+                )
+            else:
+                cursor.execute(
+                    "SELECT bet_id, embedding FROM embeddings ORDER BY bet_id"
+                )
+            
             rows = cursor.fetchall()
             
             if not rows:
@@ -417,7 +435,12 @@ class Database:
                 np.frombuffer(row["embedding"], dtype=np.float32)
                 for row in rows
             ])
-            content_hashes = [row["content_hash"] or "" for row in rows]
+            
+            # Handle missing content_hash for backwards compatibility
+            if has_content_hash:
+                content_hashes = [row["content_hash"] or "" for row in rows]
+            else:
+                content_hashes = ["" for _ in rows]
             
             self._vector_store.clear()
             self._vector_store.add_batch(bet_ids, embeddings, content_hashes)

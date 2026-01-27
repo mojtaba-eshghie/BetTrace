@@ -389,6 +389,8 @@ Please answer the question based ONLY on the bet records above. Remember to cite
         
         # Extract bet records from context
         bet_records = self._parse_bet_records_from_context(context)
+        # Filter to only records that have bet_id (defensive check)
+        bet_records = [b for b in bet_records if 'bet_id' in b]
         bet_ids = [b['bet_id'] for b in bet_records]
         
         if not bet_ids and not stats_lines:
@@ -415,7 +417,7 @@ Please answer the question based ONLY on the bet records above. Remember to cite
         elif bet_records:
             if len(bet_records) == 1:
                 b = bet_records[0]
-                answer_parts.append(f"**{b['bet_id']}**: {b.get('customer', 'Unknown')} placed a £{b.get('stake', '?')} {b.get('market', '')} bet on {b.get('event', 'Unknown')}.")
+                answer_parts.append(f"**{b.get('bet_id', 'Unknown')}**: {b.get('customer', 'Unknown')} placed a £{b.get('stake', '?')} {b.get('market', '')} bet on {b.get('event', 'Unknown')}.")
                 answer_parts.append(f"• Status: {b.get('status', 'Unknown')}")
                 answer_parts.append(f"• Incident: {b.get('incident', 'NONE')}")
                 answer_parts.append(f"• Delay: {b.get('delay', '?')}ms")
@@ -423,7 +425,7 @@ Please answer the question based ONLY on the bet records above. Remember to cite
                 # Multiple bets - generate comparison
                 answer_parts.append(f"Comparison of {len(bet_records)} bets:\n")
                 for b in bet_records:
-                    answer_parts.append(f"**{b['bet_id']}** ({b.get('customer', '?')}):")
+                    answer_parts.append(f"**{b.get('bet_id', 'Unknown')}** ({b.get('customer', '?')}):")
                     answer_parts.append(f"  • Event: {b.get('event', 'Unknown')}")
                     answer_parts.append(f"  • Stake: £{b.get('stake', '?')}, Market: {b.get('market', '?')}")
                     answer_parts.append(f"  • Status: {b.get('status', '?')}, Incident: {b.get('incident', 'NONE')}")
@@ -439,32 +441,36 @@ Please answer the question based ONLY on the bet records above. Remember to cite
         """Parse bet records from the context string."""
         import re
         records = []
-        current_record = {}
+        current_record = None  # Start with None instead of empty dict
         
         for line in context.split('\n'):
             line = line.strip()
             if line.startswith('Bet ID:'):
-                if current_record:
+                # Save previous record if exists
+                if current_record and 'bet_id' in current_record:
                     records.append(current_record)
+                # Start new record
                 current_record = {'bet_id': line.split(':', 1)[1].strip()}
-            elif line.startswith('Customer:'):
-                current_record['customer'] = line.split(':', 1)[1].strip()
-            elif line.startswith('Event:'):
-                current_record['event'] = line.split(':', 1)[1].strip()
-            elif line.startswith('Market:'):
-                current_record['market'] = line.split(':', 1)[1].strip()
-            elif line.startswith('Stake:'):
-                stake_str = line.split(':', 1)[1].strip().replace('£', '')
-                current_record['stake'] = stake_str
-            elif line.startswith('Status:'):
-                current_record['status'] = line.split(':', 1)[1].strip()
-            elif line.startswith('Incident:'):
-                current_record['incident'] = line.split(':', 1)[1].strip()
-            elif line.startswith('Price Delay:'):
-                delay_str = line.split(':', 1)[1].strip().replace('ms', '')
-                current_record['delay'] = delay_str
+            elif current_record is not None:  # Only process if we have a record started
+                if line.startswith('Customer:'):
+                    current_record['customer'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Event:'):
+                    current_record['event'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Market:'):
+                    current_record['market'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Stake:'):
+                    stake_str = line.split(':', 1)[1].strip().replace('£', '')
+                    current_record['stake'] = stake_str
+                elif line.startswith('Status:'):
+                    current_record['status'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Incident:'):
+                    current_record['incident'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Price Delay:'):
+                    delay_str = line.split(':', 1)[1].strip().replace('ms', '')
+                    current_record['delay'] = delay_str
         
-        if current_record:
+        # Don't forget the last record
+        if current_record and 'bet_id' in current_record:
             records.append(current_record)
         
         return records
