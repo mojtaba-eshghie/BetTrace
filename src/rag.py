@@ -202,13 +202,15 @@ class RAGAssistant:
             parts.append("YOUR ANSWER MUST USE THE COMPUTED FACTS ABOVE.")
             
             # Different instructions based on query type
-            if parsed.query_type in (QueryType.AGGREGATE, QueryType.TOP_N):
+            # HYBRID and SEMANTIC queries need individual bet analysis
+            if parsed.query_type in (QueryType.AGGREGATE, QueryType.TOP_N) and parsed.query_type != QueryType.HYBRID:
                 parts.append("For this query: state the computed values directly.")
                 parts.append("DO NOT list or enumerate individual bets.")
                 parts.append("The bet records below are ONLY for the 'Evidence:' citation.")
             else:
                 parts.append("Use the computed facts for any totals/averages.")
-                parts.append("You may describe individual bets as needed.")
+                parts.append("You may describe and analyze individual bets as needed.")
+                parts.append("If the user asks about 'interesting' or 'notable' bets, analyze them.")
             
             parts.append("─" * 60)
             parts.append("")

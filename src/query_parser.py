@@ -304,6 +304,8 @@ class QueryParser:
         "suspicious", "problematic", "risky", "unusual", "strange",
         "similar", "like", "related", "about", "concerning",
         "issues", "problems", "errors", "anomalies", "outliers",
+        "interesting", "notable", "significant", "important", "relevant",
+        "weird", "odd", "questionable", "curious", "remarkable",
     }
     
     # ==========================================================================
@@ -612,10 +614,23 @@ class QueryParser:
         return AggregationType.NONE, None, remaining
     
     def _has_top_n_pattern(self, text: str) -> bool:
-        """Check if query has a top/bottom N pattern."""
+        """Check if query has a top/bottom N pattern for structured ranking."""
         has_top = any(kw in text for kw in self.TOP_N_KEYWORDS)
         has_bottom = any(kw in text for kw in self.BOTTOM_N_KEYWORDS)
         has_column = any(kw in text for kw in self.COLUMN_SYNONYMS.keys())
+        
+        # Check if top/bottom keyword is followed by a semantic word (not a ranking query)
+        # e.g., "most interesting", "most suspicious" = semantic, not top_n
+        if has_top or has_bottom:
+            semantic_after_top = re.search(
+                r'\b(most|highest|largest|biggest|best|lowest|smallest|worst)\s+(' + 
+                '|'.join(self.SEMANTIC_INDICATORS) + r')',
+                text,
+                re.IGNORECASE
+            )
+            if semantic_after_top:
+                return False  # This is a semantic query, not a ranking
+        
         return (has_top or has_bottom) and has_column
     
     def _infer_sort_column(self, text: str) -> Optional[str]:
@@ -628,7 +643,17 @@ class QueryParser:
     
     def _is_general_aggregate(self, text: str) -> bool:
         """Check if query is asking for general aggregates."""
-        return any(kw in text for kw in self.GENERAL_AGGREGATE_KEYWORDS)
+        # Use word boundary matching to avoid false positives like "football bets" matching "all bets"
+        for kw in self.GENERAL_AGGREGATE_KEYWORDS:
+            # For multi-word keywords, check exact phrase
+            if ' ' in kw:
+                if re.search(r'\b' + re.escape(kw) + r'\b', text):
+                    return True
+            else:
+                # For single words, use word boundary
+                if re.search(r'\b' + re.escape(kw) + r'\b', text):
+                    return True
+        return False
     
     def _extract_semantic_terms(self, text: str) -> List[str]:
         """Extract terms that require semantic search."""

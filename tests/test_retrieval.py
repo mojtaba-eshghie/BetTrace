@@ -847,3 +847,26 @@ class TestQueryParser:
         assert parsed.aggregation == AggregationType.COUNT
         assert parsed.filters.get("status") == "REJECTED"
         assert parsed.filters.get("max_delay") == 500
+
+    def test_parse_semantic_query_most_interesting(self):
+        """Test 'most interesting' is parsed as semantic, not top_n."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Which is the most interesting rejected bet?")
+        assert parsed.query_type.value == "hybrid" or parsed.query_type.value == "semantic"
+        assert "interesting" in parsed.semantic_terms
+        # Should NOT be aggregation top_n
+        assert parsed.aggregation.value != "top_n"
+    
+    def test_parse_no_false_all_bets_match(self):
+        """Test 'football bets' doesn't falsely match 'all bets'."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        parsed = parser.parse("Most suspicious football bets")
+        # Should be hybrid (has semantic term) not aggregate
+        assert parsed.query_type.value == "hybrid"
+        assert "suspicious" in parsed.semantic_terms
