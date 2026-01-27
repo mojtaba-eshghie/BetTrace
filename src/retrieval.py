@@ -410,18 +410,38 @@ class Retriever:
     # ==================== HELPER METHODS ====================
     
     def _normalize_bet_id(self, bet_id: str) -> str:
-        """Normalize bet ID format (e.g., '42' -> 'B0042')."""
+        """
+        Normalize bet ID format.
+        
+        Examples:
+            '42' -> 'B0042'
+            'B42' -> 'B0042'
+            'B00042' -> 'B0042'  (extra zeros stripped)
+            'b0042' -> 'B0042'
+        """
         bet_id = bet_id.upper().strip()
-        if not bet_id.startswith("B"):
-            bet_id = "B" + bet_id.zfill(4)
-        return bet_id
+        if bet_id.startswith("B"):
+            num = bet_id[1:].lstrip('0') or '0'
+        else:
+            num = bet_id.lstrip('0') or '0'
+        return f"B{num.zfill(4)}"
     
     def _normalize_customer_id(self, customer_id: str) -> str:
-        """Normalize customer ID format (e.g., '29' -> 'C029')."""
+        """
+        Normalize customer ID format.
+        
+        Examples:
+            '29' -> 'C029'
+            'C29' -> 'C029'
+            'C0029' -> 'C029'  (extra zero stripped)
+            'c029' -> 'C029'
+        """
         customer_id = customer_id.upper().strip()
-        if not customer_id.startswith("C"):
-            customer_id = "C" + customer_id.zfill(3)
-        return customer_id
+        if customer_id.startswith("C"):
+            num = customer_id[1:].lstrip('0') or '0'
+        else:
+            num = customer_id.lstrip('0') or '0'
+        return f"C{num.zfill(3)}"
     
     def _extract_bet_id(self, text: str) -> Optional[str]:
         """Extract first bet ID from text (for backwards compatibility)."""
@@ -432,17 +452,23 @@ class Retriever:
         """Extract ALL bet IDs from text."""
         bet_ids = []
         
-        # Find all explicit bet ID patterns (B0042, B042, B42)
-        explicit_matches = re.findall(r'\b[Bb](\d{1,4})\b', text)
+        # Find all explicit bet ID patterns (B0042, B042, B42, B00042)
+        # Allow up to 5 digits to handle typos with extra zeros
+        explicit_matches = re.findall(r'\b[Bb](\d{1,5})\b', text)
         for match in explicit_matches:
-            bet_ids.append(f"B{match.zfill(4)}")
+            # Normalize: strip leading zeros, then pad to 4 digits
+            # B00042 → 42 → B0042
+            # B42 → 42 → B0042
+            num = match.lstrip('0') or '0'  # Handle edge case of '0000'
+            bet_ids.append(f"B{num.zfill(4)}")
         
         # Also check for "bet X" patterns without B prefix
         if "bet" in text.lower():
             # Find "bet 42" or "bets 1, 2, 3" patterns
-            bet_number_matches = re.findall(r'bets?\s+(\d{1,4})', text.lower())
+            bet_number_matches = re.findall(r'bets?\s+(\d{1,5})', text.lower())
             for match in bet_number_matches:
-                bid = f"B{match.zfill(4)}"
+                num = match.lstrip('0') or '0'
+                bid = f"B{num.zfill(4)}"
                 if bid not in bet_ids:
                     bet_ids.append(bid)
         
@@ -457,16 +483,22 @@ class Retriever:
         """Extract ALL customer IDs from text."""
         customer_ids = []
         
-        # Find all explicit customer ID patterns (C029, C29)
-        explicit_matches = re.findall(r'\b[Cc](\d{1,3})\b', text)
+        # Find all explicit customer ID patterns (C029, C29, C0029)
+        # Allow 1-4 digits to handle typos like C0029
+        explicit_matches = re.findall(r'\b[Cc](\d{1,4})\b', text)
         for match in explicit_matches:
-            customer_ids.append(f"C{match.zfill(3)}")
+            # Normalize: strip leading zeros, then pad to 3 digits
+            # C0029 → 29 → C029
+            # C29 → 29 → C029
+            num = match.lstrip('0') or '0'  # Handle edge case of '000'
+            customer_ids.append(f"C{num.zfill(3)}")
         
         # Also check for "customer X" patterns without C prefix
         if "customer" in text.lower():
-            customer_number_matches = re.findall(r'customers?\s+(\d{1,3})', text.lower())
+            customer_number_matches = re.findall(r'customers?\s+(\d{1,4})', text.lower())
             for match in customer_number_matches:
-                cid = f"C{match.zfill(3)}"
+                num = match.lstrip('0') or '0'
+                cid = f"C{num.zfill(3)}"
                 if cid not in customer_ids:
                     customer_ids.append(cid)
         

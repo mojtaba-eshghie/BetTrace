@@ -663,3 +663,54 @@ class TestEmbeddingService:
         hash2 = service._text_hash("Text two")
         
         assert hash1 != hash2, "Different texts should produce different hashes"
+
+
+# =============================================================================
+# ID Normalization Tests
+# =============================================================================
+
+class TestIDNormalization:
+    """Tests for bet ID and customer ID normalization."""
+    
+    def test_customer_id_extra_zeros(self, test_db):
+        from src.retrieval import Retriever
+        
+        retriever = Retriever(test_db)
+        
+        # All of these should normalize to C029
+        assert retriever._normalize_customer_id("C0029") == "C029"
+        assert retriever._normalize_customer_id("C029") == "C029"
+        assert retriever._normalize_customer_id("C29") == "C029"
+        assert retriever._normalize_customer_id("29") == "C029"
+        assert retriever._normalize_customer_id("c029") == "C029"
+    
+    def test_bet_id_extra_zeros(self, test_db):
+        from src.retrieval import Retriever
+        
+        retriever = Retriever(test_db)
+        
+        # All of these should normalize to B0001
+        assert retriever._normalize_bet_id("B00001") == "B0001"
+        assert retriever._normalize_bet_id("B0001") == "B0001"
+        assert retriever._normalize_bet_id("B001") == "B0001"
+        assert retriever._normalize_bet_id("B1") == "B0001"
+        assert retriever._normalize_bet_id("1") == "B0001"
+        assert retriever._normalize_bet_id("b0001") == "B0001"
+    
+    def test_extract_customer_with_extra_zeros(self, test_db):
+        from src.retrieval import Retriever
+        
+        retriever = Retriever(test_db)
+        
+        # C0029 should extract and normalize to C029
+        ids = retriever._extract_all_customer_ids("Show customer C0029 bets")
+        assert ids == ["C029"]
+    
+    def test_extract_bet_with_extra_zeros(self, test_db):
+        from src.retrieval import Retriever
+        
+        retriever = Retriever(test_db)
+        
+        # B00001 should extract and normalize to B0001
+        ids = retriever._extract_all_bet_ids("Show bet B00001")
+        assert ids == ["B0001"]

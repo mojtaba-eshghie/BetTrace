@@ -402,3 +402,45 @@ Retrieved 8 bet(s) for context
 ```
 
 
+
+
+
+```bash
+(.venv) BetTrace % python main.py ask "Show customer C929 bets" --show-context
+
+
+
+Question: Show customer C929 bets
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ I couldn't find any relevant bet records for your query. Please provide a specific bet_id (e.g., B0042) or customer_id (e.g., C068) to look up, or ask about      │
+│ specific incidents like LATENCY_SPIKE or MARKET_SUSPENDED.                                                                                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Retrieved 0 bet(s) for context
+
+⚠ The answer may be incomplete due to insufficient evidence.
+
+
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py ask "Show customer C0029 bets"
+
+Question: Show customer C0029 bets
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ You asked for C0029 — I have records for customer C029 (assuming that's the intended customer).                                                                   │
+│                                                                                                                                                                   │
+│ Computed facts for Customer: C029 — Total Bets: 1; Total Stake: £10.00; Average Stake: £10.00; Average Delay: 214ms; Maximum Delay: 214ms; Status Breakdown:      │
+│ {'SETTLED': 1}.                                                                                                                                                   │
+│                                                                                                                                                                   │
+│ Bet:                                                                                                                                                              │
+│ • Bet ID: B0001 — Sport: football; Event: PSG vs Marsielle; Market: BTTS; Selection: Yes; Stake: £10.00; Status: SETTLED; Incident: NONE; Price Delay: 214ms.     │
+│                                                                                                                                                                   │
+│ Evidence: [B0001]                                                                                                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+Evidence: B0001
+Retrieved 1 bet(s) for context
+
+
+```
+
+
