@@ -599,3 +599,67 @@ class TestCitationEnforcement:
         
         assert "Evidence: [B0001]" in result
         assert "malformed" not in result
+
+
+# =============================================================================
+# EmbeddingService Tests
+# =============================================================================
+
+class TestEmbeddingService:
+    """Tests for the centralized EmbeddingService."""
+    
+    def test_singleton_pattern(self):
+        """Test that get_embedding_service returns the same instance."""
+        from src.embedding_service import get_embedding_service
+        
+        service1 = get_embedding_service()
+        service2 = get_embedding_service()
+        
+        assert service1 is service2, "Should return same singleton instance"
+    
+    def test_cache_stats(self):
+        """Test cache statistics."""
+        from src.embedding_service import EmbeddingService
+        
+        service = EmbeddingService()
+        stats = service.cache_stats()
+        
+        assert "size" in stats
+        assert "max_size" in stats
+        assert stats["size"] == 0  # Fresh service has empty cache
+        assert stats["max_size"] == EmbeddingService.CACHE_SIZE
+    
+    def test_clear_cache(self):
+        """Test cache clearing."""
+        from src.embedding_service import EmbeddingService
+        
+        service = EmbeddingService()
+        # Manually add to cache
+        service._cache["test_hash"] = "test_value"
+        assert len(service._cache) == 1
+        
+        service.clear_cache()
+        assert len(service._cache) == 0
+    
+    def test_text_hash_consistency(self):
+        """Test that same text produces same hash."""
+        from src.embedding_service import EmbeddingService
+        
+        service = EmbeddingService()
+        
+        text = "This is a test"
+        hash1 = service._text_hash(text)
+        hash2 = service._text_hash(text)
+        
+        assert hash1 == hash2, "Same text should produce same hash"
+    
+    def test_text_hash_uniqueness(self):
+        """Test that different texts produce different hashes."""
+        from src.embedding_service import EmbeddingService
+        
+        service = EmbeddingService()
+        
+        hash1 = service._text_hash("Text one")
+        hash2 = service._text_hash("Text two")
+        
+        assert hash1 != hash2, "Different texts should produce different hashes"

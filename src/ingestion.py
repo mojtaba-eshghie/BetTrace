@@ -3,7 +3,7 @@ Data ingestion module for the Sportsbook RAG Assistant.
 
 Handles:
 - Loading bet data from CSV files
-- Generating embeddings via OpenAI API
+- Generating embeddings via EmbeddingService (shared, cached, with retry)
 - Storing data in the hybrid database
 """
 
@@ -11,17 +11,15 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import List, Optional
-from openai import OpenAI
 
 from .config import (
     CSV_PATH, 
-    OPENAI_API_KEY, 
     EMBEDDING_MODEL,
     EMBEDDING_DIMENSIONS,
-    validate_config
 )
 from .models import Bet
 from .database import Database
+from .embedding_service import get_embedding_service
 
 
 class Ingestion:
@@ -32,15 +30,14 @@ class Ingestion:
     def __init__(self, db: Optional[Database] = None):
         """Initialize the ingestion module."""
         self.db = db or Database()
-        self._client: Optional[OpenAI] = None
+        self._embedding_service = None
     
     @property
-    def client(self) -> OpenAI:
-        """Lazy initialization of OpenAI client."""
-        if self._client is None:
-            validate_config()
-            self._client = OpenAI(api_key=OPENAI_API_KEY)
-        return self._client
+    def embedding_service(self):
+        """Get the shared embedding service (lazy initialization)."""
+        if self._embedding_service is None:
+            self._embedding_service = get_embedding_service()
+        return self._embedding_service
     
     def load_csv(self, csv_path: Optional[Path] = None) -> List[Bet]:
         """
@@ -80,7 +77,12 @@ class Ingestion:
         batch_size: int = 100
     ) -> np.ndarray:
         """
-        Generate embeddings for a list of texts using OpenAI API.
+        Generate embeddings for a list of texts using the shared EmbeddingService.
+        
+        The EmbeddingService provides:
+        - Caching (avoids re-embedding identical texts)
+        - Retry with exponential backoff (handles rate limits and transient errors)
+        - Shared OpenAI client (single connection pool)
         
         Args:
             texts: List of text strings to embed
@@ -88,41 +90,14 @@ class Ingestion:
             
         Returns:
             NumPy array of embeddings (shape: [len(texts), EMBEDDING_DIMENSIONS])
-            
-        Raises:
-            ValueError: If the generated embeddings have unexpected dimensions
         """
-        all_embeddings = []
-        
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            
-            response = self.client.embeddings.create(
-                model=EMBEDDING_MODEL,
-                input=batch
-            )
-            
-            # Extract embeddings and maintain order
-            batch_embeddings = [
-                item.embedding for item in response.data
-            ]
-            all_embeddings.extend(batch_embeddings)
-            
-            print(f"  → Generated embeddings for {min(i + batch_size, len(texts))}/{len(texts)} documents")
-        
-        embeddings = np.array(all_embeddings, dtype=np.float32)
-        
-        # Validate dimension matches config
-        actual_dim = embeddings.shape[1]
-        if actual_dim != EMBEDDING_DIMENSIONS:
-            raise ValueError(
-                f"Embedding dimension mismatch!\n"
-                f"  Model '{EMBEDDING_MODEL}' produced: {actual_dim} dimensions\n"
-                f"  Config EMBEDDING_DIMENSIONS: {EMBEDDING_DIMENSIONS}\n"
-                f"  Solution: Update EMBEDDING_DIMENSIONS in config.py to {actual_dim}"
-            )
-        
-        return embeddings
+        # Delegate to the shared embedding service
+        return self.embedding_service.embed_batch(
+            texts=texts,
+            batch_size=batch_size,
+            use_cache=True,
+            show_progress=True
+        )
     
     def ingest(
         self, 

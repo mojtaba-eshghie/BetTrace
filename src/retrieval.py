@@ -4,27 +4,24 @@ Retrieval module for the Sportsbook RAG Assistant.
 Provides high-level retrieval interface combining:
 - Exact lookups (by bet_id, customer_id)
 - Structured filtering (by status, incident, sport, etc.)
-- Semantic search (using embeddings)
+- Semantic search (using embeddings via shared EmbeddingService)
 - Hybrid search (combining structured + semantic)
 """
 
 import re
 import numpy as np
 from typing import List, Optional, Dict, Any, Tuple
-from openai import OpenAI
 
 from .config import (
-    OPENAI_API_KEY,
-    EMBEDDING_MODEL,
     DEFAULT_TOP_K,
     SIMILARITY_THRESHOLD,
     VALID_SPORTS,
     VALID_STATUSES,
     VALID_INCIDENTS,
-    validate_config
 )
 from .models import Bet, RetrievalResult, QueryContext
 from .database import Database
+from .embedding_service import get_embedding_service
 
 
 class Retriever:
@@ -34,30 +31,32 @@ class Retriever:
     Supports multiple retrieval strategies:
     1. Exact match: Direct lookup by bet_id or customer_id
     2. Filtered: SQL-based filtering on structured columns
-    3. Semantic: Embedding-based similarity search
+    3. Semantic: Embedding-based similarity search (via shared EmbeddingService)
     4. Hybrid: Combining structured filters with semantic ranking
     """
     
     def __init__(self, db: Database):
         """Initialize the retriever with a database connection."""
         self.db = db
-        self._client: Optional[OpenAI] = None
+        self._embedding_service = None
     
     @property
-    def client(self) -> OpenAI:
-        """Lazy initialization of OpenAI client."""
-        if self._client is None:
-            validate_config()
-            self._client = OpenAI(api_key=OPENAI_API_KEY)
-        return self._client
+    def embedding_service(self):
+        """Get the shared embedding service (lazy initialization)."""
+        if self._embedding_service is None:
+            self._embedding_service = get_embedding_service()
+        return self._embedding_service
     
     def _get_embedding(self, text: str) -> np.ndarray:
-        """Generate embedding for a single text."""
-        response = self.client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=text
-        )
-        return np.array(response.data[0].embedding, dtype=np.float32)
+        """
+        Generate embedding for a single text using the shared EmbeddingService.
+        
+        Benefits:
+        - Caching: Same query won't be re-embedded
+        - Retry: Handles rate limits and transient errors
+        - Shared client: Single connection pool across the app
+        """
+        return self.embedding_service.embed_text(text, use_cache=True)
     
     # ==================== EXACT LOOKUPS ====================
     
