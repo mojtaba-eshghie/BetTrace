@@ -444,3 +444,19 @@ Retrieved 1 bet(s) for context
 ```
 
 
+
+
+
+```bash
+(.venv) mojtabae@pool4-36-234 BetTrace % python main.py ask "Show customer F029 bets" --show-context
+
+Question: Show customer F029 bets
+
+╭───────────────────────────────────────────────────────────────────────────── Answer ──────────────────────────────────────────────────────────────────────────────╮
+│ I couldn't find any relevant bet records for your query. Please provide a specific bet_id (e.g., B0042) or customer_id (e.g., C068) to look up, or ask about      │
+│ specific incidents like LATENCY_SPIKE or MARKET_SUSPENDED.                                                                                                        │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+Retrieved 0 bet(s) for context
+
+⚠ The answer may be incomplete due to insufficient evidence.
+```

@@ -196,6 +196,8 @@ class RAGAssistant:
                     results.append(result)
             if results:
                 return results, len(results)
+            # User asked for specific bet IDs but none found - return empty, don't fall back
+            return [], 0
         
         # Check for MULTIPLE customer IDs - return all their bets
         all_customer_ids = self.retriever._extract_all_customer_ids(query)
@@ -206,6 +208,13 @@ class RAGAssistant:
                 results.extend(customer_results)
             if results:
                 return results, len(results)
+            # User asked for specific customers but none found - return empty, don't fall back
+            return [], 0
+        
+        # Check if user INTENDED to query a customer/bet but we couldn't parse the ID
+        # This prevents falling back to semantic search for queries like "customer F029"
+        if self._has_entity_intent_but_no_match(query):
+            return [], 0
         
         # Check for incident tag - return ALL matching bets
         incident_match = self.retriever._extract_incident_tag(query)
@@ -465,6 +474,41 @@ class RAGAssistant:
         ]
         
         return any(keyword in query_lower for keyword in aggregate_keywords)
+    
+    def _has_entity_intent_but_no_match(self, query: str) -> bool:
+        """
+        Detect if user intended to query a specific customer/bet but we couldn't parse it.
+        
+        This prevents falling back to semantic search for queries like:
+        - "customer F029" (invalid prefix)
+        - "bet X123" (invalid format)
+        - "show me customer abc" (non-numeric ID)
+        
+        Returns True if we should NOT fall back to semantic search.
+        """
+        query_lower = query.lower()
+        
+        # User said "customer" but we didn't extract any customer IDs
+        if "customer" in query_lower:
+            # Check if there's something that looks like an ID attempt after "customer"
+            import re
+            # Match "customer" followed by something that looks like an ID attempt
+            # (letter + digits, or just digits, or alphanumeric)
+            if re.search(r'customer\s+[a-z]?\d+', query_lower):
+                return True
+            if re.search(r'customer\s+\w+\d+', query_lower):
+                return True
+        
+        # User said "bet" but we didn't extract any bet IDs  
+        if "bet " in query_lower or "bets " in query_lower:
+            import re
+            # Match "bet" followed by something that looks like an ID attempt
+            if re.search(r'bets?\s+[a-z]?\d+', query_lower):
+                return True
+            if re.search(r'bets?\s+\w+\d+', query_lower):
+                return True
+        
+        return False
     
     def _extract_sport(self, query: str) -> Optional[str]:
         """Extract sport name from query."""
