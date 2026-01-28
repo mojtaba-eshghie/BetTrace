@@ -441,6 +441,68 @@ CREATE INDEX idx_incident ON bets(incident_tag);
 
 ---
 
+Great question! Let me analyze the tradeoffs and future improvements:
+
+## Current Tradeoffs
+
+### 1. Prompt injection attack risk
+To construct the context sent to the LLM, some parts are extracted directly from the database with the assumption that the dataset contents are safe, whereas in reality, they should not be assumped safe. This risks for instance that the `event_name` of some rows are adversarially selected to change the behavior of the model. 
+
+### 2. Phonetic Normalization
+| Benefit | Tradeoff |
+|---------|----------|
+| Handles typos well | **Over-matching risk**: "Smith" and "Smyth" both → "SMTH". Given more time and more context to the problem, either improve this or change it to something more reliable. |
+
+### 3. Team-Level Embeddings
+| Benefit | Tradeoff |
+|---------|----------|
+| Precise team matching | **3x storage cost**: document + team1 + team2 embeddings |
+
+### 4. SafeCalculator (No LLM Math)
+| Benefit | Tradeoff |
+|---------|----------|
+| 100% accurate arithmetic and No hallucinated numbers | **Rigid**: Only pre-defined computations work and **Can't handle creative queries**: "What's the ROI if...". **SafeCalculator** might be vulnerable to SQL injection (although the command is executed read-only); for a production environment, we should do this in a more secure way or a more sandboxed environment for the SafeCalculator instead of directly asking the main database to run the queries. |
+
+### 5. Query Routing (Deterministic Rules)
+| Benefit | Tradeoff |
+|---------|----------|
+| Fast, predictable | **Brittle**: Complex if-else chains hard to maintain |
+| No LLM call needed | **Edge cases**: Ambiguous queries may route incorrectly |
+
+
+### 6. Analysis Intent Detection (Keywords)
+| Benefit | Tradeoff |
+|---------|----------|
+| Simple implementation | **Hardcoded list**: "break it down" won't trigger analysis |
+| Fast | **False positives**: For instance, "explain" might over-trigger |
+
+### 7. Single LLM Call Architecture
+| Benefit | Tradeoff |
+|---------|----------|
+| Low latency, low cost | **No multi-step reasoning**: Complex queries fail. Depending on the complexity of the real queries BetTrace is going to handle, we may enable multi-step reasoning in chat (this may be helpful in parsing complex queries and giving more sandboxed tool call capabilities processing these queries.)|
+| Simple error handling (for instance, *you should give a bet id to retrieve information about this bet.*) | **No clarification**: Can't ask "Did you mean X?" |
+
+
+### 8. Ingestion, SQLite, and FAISS 
+| Benefit | Tradeoff |
+|---------|----------|
+| Toy infrastructure for vectorization | **Not scalable**: The brute-force version of FAISS we use struggles beyond ~100K records; future versions should improve this by using its approximate search and probably GPU acceleration. **SQLite**: This embedded RDBMS is not good for concurrent writes if this is going to be a thing in the real BetTrace app.|
+| Easy deployment | **No concurrency**: Single writer at a time. Depending on our need for concurrent dataset writes and ingestions, we may change this. |
+| Relatively straightforward ingestion | No idempotency during ingestion (see issue #8); If ingestion fails at record 50/100, re-running it wipes the DB and starts over. For large datasets, we need upsert logic (insert or update if existing) that skips already processed records to allow resuming. |
+
+
+### 9. Embedding Model (text-embedding-3-small)
+| Benefit | Tradeoff |
+|---------|----------|
+| Good enough for teams | **No domain tuning**: Sports-specific terms may embed poorly. We may fine-tune our own embedding model. |
+
+### 10. Robust Benchmarking & CI/CD
+
+The project does not have a proper CI/CD pipeline set up (although we have unit test and acceptace tests); for real-world usage, we should first create this before moving to deploying of the features. Besides, 7 acceptance tests are not enough for evaulation; we may use ground truth from the company or automatically diversify the 7 cases to generate more test cases. 
+
+
+
+---
 ## Configuration
 
 ### Environment Variables (`.env`)
@@ -461,7 +523,7 @@ CSV_PATH=data/bets.csv
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `EMBEDDING_DIMENSIONS` | 1536 | Vector dimensions for text-embedding-3-small |
-| `DEFAULT_TOP_K` | 10 | Default number of results to retrieve |
+| `DEFAULT_TOP_K` | 100 | Default number of results to retrieve |
 | `SIMILARITY_THRESHOLD` | 0.3 | Minimum cosine similarity for semantic matches |
 
 ---
