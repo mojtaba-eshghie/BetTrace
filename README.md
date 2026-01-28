@@ -451,7 +451,7 @@ OPENAI_API_KEY=sk-...
 
 # Optional (defaults shown)
 EMBEDDING_MODEL=text-embedding-3-small
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-5-mini-2025-08-07
 DATABASE_PATH=data/bets.db
 CSV_PATH=data/bets.csv
 ```
@@ -512,6 +512,13 @@ python main.py stats
 
 ## Testing
 
+You can run acceptance tests in `ACCEPTANCE_TESTS.md` file manually which includes 7 questions. 
+
+
+### Unit Tests
+
+The following are unit tests to test the functionality of individual system components. 
+
 ```bash
 # Run all tests
 python -m pytest tests/ -v
@@ -522,8 +529,6 @@ python -m pytest tests/test_retrieval.py -v
 # Run with coverage
 python -m pytest tests/ --cov=src --cov-report=html
 ```
-
-### Test Categories
 
 | Test File | Coverage |
 |-----------|----------|
