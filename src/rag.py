@@ -160,7 +160,17 @@ class RAGAssistant:
         parsed = exec_result.parsed_query
         
         # Provide helpful error message based on what was attempted
-        if parsed.invalid_entity_reference:
+        if parsed.incomplete_id_query:
+            # User asked for a bet/customer by ID but didn't provide the ID
+            if parsed.incomplete_id_query == "bet":
+                msg = ("Please specify which bet ID you'd like to see. "
+                       "Bet IDs are in the format B0042. "
+                       "For example, try: 'Give me bet B0042' or 'Show me details for bet B0095'.")
+            else:  # customer
+                msg = ("Please specify which customer ID you'd like to see. "
+                       "Customer IDs are in the format C068. "
+                       "For example, try: 'Give me customer C068' or 'Show me bets for customer C103'.")
+        elif parsed.invalid_entity_reference:
             msg = (f"Invalid ID format: '{parsed.invalid_entity_reference}'. "
                    f"Customer IDs should be like C029, and bet IDs should be like B0042.")
         elif parsed.bet_ids:
