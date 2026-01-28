@@ -225,6 +225,25 @@ class QueryParser:
     CUSTOMER_WORD_PATTERN = re.compile(r'customers?\s+(\d{1,4})', re.IGNORECASE)
     BET_WORD_PATTERN = re.compile(r'bets?\s+(\d{1,5})', re.IGNORECASE)
     
+    # Incomplete ID query patterns (compiled once for performance)
+    INCOMPLETE_BET_PATTERNS = [
+        re.compile(r'\bbet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "bet with id" not followed by actual ID
+        re.compile(r'\ba\s+bet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "a bet with id"
+        re.compile(r'\bsome\s+(?:a\s+)?bet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "some a bet with id"
+        re.compile(r'\bshow\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "show bet id"
+        re.compile(r'\bget\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "get bet id"
+        re.compile(r'\bfind\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "find bet id"
+    ]
+    
+    INCOMPLETE_CUSTOMER_PATTERNS = [
+        re.compile(r'\bcustomer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "customer with id"
+        re.compile(r'\ba\s+customer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "a customer with id"
+        re.compile(r'\bsome\s+(?:a\s+)?customer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "some a customer with id"
+        re.compile(r'\bshow\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "show customer id"
+        re.compile(r'\bget\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "get customer id"
+        re.compile(r'\bfind\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "find customer id"
+    ]
+    
     # Sort keywords → (column, order)
     SORT_KEYWORDS: Dict[str, Tuple[str, str]] = {
         # Stake sorting
@@ -415,16 +434,16 @@ class QueryParser:
         # This prevents falling through to semantic search for clearly invalid IDs
         parsed.invalid_entity_reference = self._detect_invalid_entity_reference(query_lower, parsed)
         
-        # 8.5. Check for incomplete ID queries (e.g., "give me a bet with id" without specifying the ID)
+        # 9. Check for incomplete ID queries (e.g., "give me a bet with id" without specifying the ID)
         # This prevents falling through to semantic search when user clearly wants an ID-based lookup
         if not parsed.invalid_entity_reference:
             parsed.incomplete_id_query = self._detect_incomplete_id_query(query_lower, parsed)
         
-        # 9. Extract semantic terms from remaining text (only if no invalid entity reference or incomplete query)
+        # 10. Extract semantic terms from remaining text (only if no invalid entity reference or incomplete query)
         if not parsed.invalid_entity_reference and not parsed.incomplete_id_query:
             parsed.semantic_terms = self._extract_semantic_terms(remaining_text)
         
-        # 10. Calculate parse confidence
+        # 11. Calculate parse confidence
         parsed.parse_confidence = self._calculate_confidence(parsed)
         
         return parsed
@@ -484,33 +503,14 @@ class QueryParser:
         if parsed.bet_ids or parsed.customer_ids:
             return None
         
-        # Patterns that indicate the user wants to query by ID but hasn't provided one
-        incomplete_bet_patterns = [
-            r'\bbet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)',  # "bet with id" or "bet id" not followed by actual ID
-            r'\ba\s+bet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)',  # "a bet with id"
-            r'\bsome\s+(?:a\s+)?bet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)',  # "some a bet with id"
-            r'\bshow\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)',  # "show bet id" or "show me the bet id"
-            r'\bget\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)',  # "get bet id"
-            r'\bfind\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)',  # "find bet id"
-        ]
-        
-        incomplete_customer_patterns = [
-            r'\bcustomer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)',  # "customer with id" or "customer id"
-            r'\ba\s+customer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)',  # "a customer with id"
-            r'\bsome\s+(?:a\s+)?customer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)',  # "some a customer with id"
-            r'\bshow\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)',  # "show customer id"
-            r'\bget\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)',  # "get customer id"
-            r'\bfind\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)',  # "find customer id"
-        ]
-        
-        # Check bet patterns
-        for pattern in incomplete_bet_patterns:
-            if re.search(pattern, query, re.IGNORECASE):
+        # Check bet patterns (using pre-compiled class constants)
+        for pattern in self.INCOMPLETE_BET_PATTERNS:
+            if pattern.search(query):
                 return "bet"
         
-        # Check customer patterns
-        for pattern in incomplete_customer_patterns:
-            if re.search(pattern, query, re.IGNORECASE):
+        # Check customer patterns (using pre-compiled class constants)
+        for pattern in self.INCOMPLETE_CUSTOMER_PATTERNS:
+            if pattern.search(query):
                 return "customer"
         
         return None
