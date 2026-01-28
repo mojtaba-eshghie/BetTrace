@@ -15,7 +15,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import print as rprint
 
-from .config import CSV_PATH, DATABASE_PATH
+from .config import CSV_PATH, DATABASE_PATH, DEBUG_MODE
 from .database import Database
 from .ingestion import Ingestion
 from .retrieval import Retriever, create_retriever
@@ -393,7 +393,8 @@ def ask(question: str, top_k: int, db: Optional[str], show_context: bool):
       sportsbook ask "Find the highest price_delay_ms bets and summarize"
       sportsbook ask "For customer C068, summarize their bets and incidents"
     """
-    console.log(f"[blue]DEBUG MODE: Starting RAG assistant for question: {question}[/blue]")
+    if DEBUG_MODE:
+        console.log(f"[blue]DEBUG MODE: Starting RAG assistant for question: {question}[/blue]")
     try:
         db_instance = Database(Path(db) if db else DATABASE_PATH)
         assistant = RAGAssistant(db_instance)
