@@ -67,6 +67,9 @@ class ParsedQuery:
     # Flag for invalid entity references (e.g., "customer F029" where F is not valid)
     invalid_entity_reference: Optional[str] = None  # Stores the invalid reference for error message
     
+    # Flag for incomplete ID queries (e.g., "give me a bet with id" without specifying which ID)
+    incomplete_id_query: Optional[str] = None  # Stores what type of ID is missing: "bet" or "customer"
+    
     # Structured filters (converted to SQL WHERE)
     filters: Dict[str, Any] = field(default_factory=dict)
     # Supported filter keys:
@@ -98,6 +101,10 @@ class ParsedQuery:
         # Invalid entity reference should return empty (not fall to semantic)
         if self.invalid_entity_reference:
             return QueryType.ENTITY_LOOKUP  # Will return empty in executor
+        
+        # Incomplete ID query should return empty (not fall to semantic)
+        if self.incomplete_id_query:
+            return QueryType.ENTITY_LOOKUP  # Will return empty in executor with helpful message
         
         # Entity lookup takes priority
         if self.bet_ids or self.customer_ids:
@@ -217,6 +224,25 @@ class QueryParser:
     CUSTOMER_ID_PATTERN = re.compile(r'\b[Cc](\d{1,4})\b')
     CUSTOMER_WORD_PATTERN = re.compile(r'customers?\s+(\d{1,4})', re.IGNORECASE)
     BET_WORD_PATTERN = re.compile(r'bets?\s+(\d{1,5})', re.IGNORECASE)
+    
+    # Incomplete ID query patterns (compiled once for performance)
+    INCOMPLETE_BET_PATTERNS = [
+        re.compile(r'\bbet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "bet with id" not followed by actual ID
+        re.compile(r'\ba\s+bet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "a bet with id"
+        re.compile(r'\bsome\s+(?:a\s+)?bet\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "some a bet with id"
+        re.compile(r'\bshow\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "show bet id"
+        re.compile(r'\bget\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "get bet id"
+        re.compile(r'\bfind\s+(?:me\s+)?(?:the\s+)?bet\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "find bet id"
+    ]
+    
+    INCOMPLETE_CUSTOMER_PATTERNS = [
+        re.compile(r'\bcustomer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "customer with id"
+        re.compile(r'\ba\s+customer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "a customer with id"
+        re.compile(r'\bsome\s+(?:a\s+)?customer\s+(?:with\s+)?id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "some a customer with id"
+        re.compile(r'\bshow\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "show customer id"
+        re.compile(r'\bget\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "get customer id"
+        re.compile(r'\bfind\s+(?:me\s+)?(?:the\s+)?customer\s+id\b(?!\s*[bcBC]?\d)', re.IGNORECASE),  # "find customer id"
+    ]
     
     # Sort keywords → (column, order)
     SORT_KEYWORDS: Dict[str, Tuple[str, str]] = {
@@ -408,11 +434,16 @@ class QueryParser:
         # This prevents falling through to semantic search for clearly invalid IDs
         parsed.invalid_entity_reference = self._detect_invalid_entity_reference(query_lower, parsed)
         
-        # 9. Extract semantic terms from remaining text (only if no invalid entity reference)
+        # 9. Check for incomplete ID queries (e.g., "give me a bet with id" without specifying the ID)
+        # This prevents falling through to semantic search when user clearly wants an ID-based lookup
         if not parsed.invalid_entity_reference:
+            parsed.incomplete_id_query = self._detect_incomplete_id_query(query_lower, parsed)
+        
+        # 10. Extract semantic terms from remaining text (only if no invalid entity reference or incomplete query)
+        if not parsed.invalid_entity_reference and not parsed.incomplete_id_query:
             parsed.semantic_terms = self._extract_semantic_terms(remaining_text)
         
-        # 10. Calculate parse confidence
+        # 11. Calculate parse confidence
         parsed.parse_confidence = self._calculate_confidence(parsed)
         
         return parsed
@@ -452,6 +483,35 @@ class QueryParser:
         invalid_bet = re.search(r'bets?\s+([a-ac-z]\d+)', query, re.IGNORECASE)
         if invalid_bet:
             return f"bet {invalid_bet.group(1)}"
+        
+        return None
+    
+    def _detect_incomplete_id_query(self, query: str, parsed: ParsedQuery) -> Optional[str]:
+        """
+        Detect if user is asking for a bet/customer by ID but didn't provide the actual ID.
+        
+        Examples that should be detected:
+        - "give me a bet with id"
+        - "show me bet with id"
+        - "get me some bet with id"
+        - "find customer with id"
+        - "show the bet id"
+        
+        Returns "bet" or "customer" if detected, None otherwise.
+        """
+        # If we already found valid IDs, the query is complete
+        if parsed.bet_ids or parsed.customer_ids:
+            return None
+        
+        # Check bet patterns (using pre-compiled class constants)
+        for pattern in self.INCOMPLETE_BET_PATTERNS:
+            if pattern.search(query):
+                return "bet"
+        
+        # Check customer patterns (using pre-compiled class constants)
+        for pattern in self.INCOMPLETE_CUSTOMER_PATTERNS:
+            if pattern.search(query):
+                return "customer"
         
         return None
     

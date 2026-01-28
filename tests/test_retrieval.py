@@ -1032,3 +1032,68 @@ class TestQueryParser:
         for correct, misspelled in pairs:
             assert phonetic_normalize(correct) == phonetic_normalize(misspelled), \
                 f"Expected {correct} and {misspelled} to have same phonetic code"
+    
+    def test_parse_incomplete_bet_id_query(self):
+        """Test detection of incomplete bet ID queries."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Test various incomplete bet ID query patterns
+        incomplete_queries = [
+            "Give me some a bet with id",
+            "show me bet with id",
+            "get the bet id",
+            "find bet id",
+        ]
+        
+        for query in incomplete_queries:
+            parsed = parser.parse(query)
+            assert parsed.incomplete_id_query == "bet", \
+                f"Query '{query}' should be detected as incomplete bet query"
+            assert len(parsed.bet_ids) == 0, \
+                f"Query '{query}' should have no bet IDs"
+    
+    def test_parse_incomplete_customer_id_query(self):
+        """Test detection of incomplete customer ID queries."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Test various incomplete customer ID query patterns
+        incomplete_queries = [
+            "find customer with id",
+            "give me a customer id",
+            "show me customer with id",
+            "get the customer id",
+        ]
+        
+        for query in incomplete_queries:
+            parsed = parser.parse(query)
+            assert parsed.incomplete_id_query == "customer", \
+                f"Query '{query}' should be detected as incomplete customer query"
+            assert len(parsed.customer_ids) == 0, \
+                f"Query '{query}' should have no customer IDs"
+    
+    def test_parse_complete_id_queries_not_flagged(self):
+        """Test that complete ID queries are NOT flagged as incomplete."""
+        from src.query_parser import get_query_parser
+        
+        parser = get_query_parser()
+        
+        # Test complete queries that should NOT be flagged
+        complete_queries = [
+            "give me bet B0042",
+            "show me customer C068",
+            "B0095",
+            "customer C103",
+            "bet id B0001",
+            "customer id C001",
+        ]
+        
+        for query in complete_queries:
+            parsed = parser.parse(query)
+            assert parsed.incomplete_id_query is None, \
+                f"Query '{query}' should NOT be detected as incomplete"
+            assert len(parsed.bet_ids) > 0 or len(parsed.customer_ids) > 0, \
+                f"Query '{query}' should have extracted IDs"
