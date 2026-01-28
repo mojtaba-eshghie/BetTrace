@@ -87,8 +87,8 @@ def ingest(csv: Optional[str], db: Optional[str], skip_embeddings: bool):
 @click.argument("query")
 @click.option(
     "--top-k", "-k",
-    default=5,
-    help="Number of results to return (default: 5)"
+    default=100,
+    help="Number of results to return (default: 100)"
 )
 @click.option(
     "--method", "-m",
@@ -364,8 +364,8 @@ def stats(db: Optional[str]):
 @click.argument("question")
 @click.option(
     "--top-k", "-k",
-    default=10,
-    help="Maximum number of bets to retrieve (default: 10)"
+    default=100,
+    help="Maximum number of bets to retrieve (default: 100)"
 )
 @click.option(
     "--db", "-d",
@@ -458,7 +458,7 @@ def chat(db: Optional[str]):
         assistant = RAGAssistant(db_instance)
         
         console.print("\n" + "="*60)
-        console.print("[bold]SPORTSBOOK RAG ASSISTANT[/bold]")
+        console.print("[bold][blue]BetTrace: A SPORTSBOOK RAG ASSISTANT[/blue][/bold]")
         console.print("="*60)
         console.print("Ask questions about bet records. Type 'quit' to exit.\n")
         console.print("Example questions:")

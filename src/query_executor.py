@@ -70,6 +70,11 @@ class QueryExecutor:
         """
         # Parse the query
         parsed = self.parser.parse(query)
+
+
+        # print("+++++++ Parsed Query +++++++")
+        # print(parsed.query_type)
+        # print("++++++++++++++++++++++++++++")
         
         # Route to appropriate handler based on query type
         if parsed.query_type == QueryType.ENTITY_LOOKUP:
@@ -305,7 +310,7 @@ class QueryExecutor:
         
         try:
             # Use lower threshold for team searches (want max recall)
-            threshold = 0.2 if team_search else None  # None = use default
+            threshold = 0.7 if team_search else None  # None = use default
             
             results = self.retriever.semantic_search(
                 query, 
@@ -430,6 +435,7 @@ class QueryExecutor:
     
     def _compute_customer_stats(self, customer_ids: List[str], results: List[RetrievalResult]) -> str:
         """Compute statistics for customer lookup."""
+        # print(f"***** We are here 1 *****")
         lines = ["=" * 60]
         lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
         lines.append("=" * 60)
@@ -460,6 +466,7 @@ class QueryExecutor:
     
     def _compute_bet_stats(self, results: List[RetrievalResult]) -> str:
         """Compute statistics for bet lookup."""
+        # print(f"***** We are here 2 *****")
         lines = ["=" * 60]
         lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
         lines.append("=" * 60)
@@ -490,6 +497,7 @@ class QueryExecutor:
         desc: bool
     ) -> str:
         """Compute statistics for top/bottom N query."""
+        # print(f"***** We are here 3 *****")
         lines = ["=" * 60]
         lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
         lines.append("=" * 60)
@@ -540,6 +548,7 @@ class QueryExecutor:
     
     def _compute_aggregate_stats(self, parsed: ParsedQuery, calc_filters: Dict) -> str:
         """Compute statistics for aggregate query."""
+        # print(f"***** We are here 4 *****")
         lines = ["=" * 60]
         lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
         lines.append("=" * 60)

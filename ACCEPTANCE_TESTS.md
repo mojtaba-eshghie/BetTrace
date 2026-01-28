@@ -10,6 +10,7 @@ This document contains 6 acceptance test questions for the Sportsbook RAG Assist
 ## Test 1: Bet-Specific — Single Bet Rejection
 
 **Question:** `Why was bet B0004 rejected?`
+**Question:** `Why were bets B0004 and B0022 rejected?`
 
 **Expected Output:**
 ```
@@ -203,6 +204,12 @@ Evidence: B0094, B0066, B0050, B0028
 - Explains the relationship between FEED_OUTAGE and VOID
 - Notes the elevated latencies
 - Correctly excludes B0025 (VOID but NONE incident)
+
+## Test 7: Semantic Search for Team/Players
+```bash
+python main.py ask "All bets involving Thundr" --show-context
+```
+
 
 ---
 

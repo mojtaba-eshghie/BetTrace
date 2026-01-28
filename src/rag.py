@@ -124,15 +124,35 @@ class RAGAssistant:
         if not exec_result.results:
             return self._handle_empty_results(query, exec_result)
         
+
+        # print(f"***** Executed query, retrieved {exec_result} *****")
         # Step 3: Build context for LLM
         context = self._build_context(exec_result, top_k)
-        
+        # print(f"***** Built context *****")
+        # print(context)
+        # print(f"*************************")
+
+
         # Step 4: Generate answer
         answer = self._generate_answer(query, context, exec_result.parsed_query)
         
+
+        # print(f"***** Generated answer before enforcement of citations *****")
+        # print(answer)
+        # print(f"****************************")
+
+
         # Step 5: Extract and enforce citations
         citations = self._extract_citations(answer, exec_result.results)
-        answer = self._enforce_citations(answer, citations, exec_result.results)
+        # answer = self._enforce_citations(answer, citations, exec_result.results)
+
+
+        # print(f"***** Generated answer *****")
+        # print(answer)
+        # print(f"****************************")
+
+
+        # print(f"***** Citations: {citations} *****")
         
         # Re-extract citations after enforcement
         if not citations and exec_result.results:
@@ -218,8 +238,10 @@ class RAGAssistant:
             # TOP_N queries or anything with analysis intent: allow individual bet analysis
             if parsed.query_type == QueryType.AGGREGATE and not has_analysis_intent:
                 parts.append("For this query: state the computed values directly.")
-                parts.append("DO NOT list or enumerate individual bets.")
-                parts.append("The bet records below are ONLY for the 'Evidence:' citation.")
+                # parts.append("DO NOT list or enumerate individual bets.")
+                # parts.append("The bet records below are ONLY for the 'Evidence:' citation.")
+                parts.append("Use the bet records below for 'Evidence:' citation. STRICTLY include ALL bet IDs related to the answer.")
+                # parts.append("For Evidence, cite all bet IDs you use to answer.")
             else:
                 parts.append("Use the computed facts for any totals/averages.")
                 parts.append("You may describe and analyze individual bets as needed.")

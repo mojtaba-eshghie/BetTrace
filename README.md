@@ -1,4 +1,4 @@
-# Sportsbook RAG Assistant
+# BetTrace: A Sportsbook RAG Assistant
 
 A Retrieval-Augmented Generation (RAG) system for querying sports betting records using natural language. Built with a hybrid architecture combining structured SQL queries, semantic vector search, and LLM-powered response generation.
 
