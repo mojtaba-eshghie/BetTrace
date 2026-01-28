@@ -18,7 +18,10 @@ from .models import Bet, RetrievalResult
 from .database import Database
 from .retrieval import Retriever
 from .calculator import SafeCalculator, CalculationRequest, CalculationType
+from .config import DEBUG_MODE
 
+from rich.console import Console
+console = Console()
 
 @dataclass
 class ExecutionResult:
@@ -68,6 +71,8 @@ class QueryExecutor:
         Returns:
             ExecutionResult with results, stats, and metadata
         """
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Executing query:[/green] '{query}' with top_k={top_k}\n")
         # Parse the query
         parsed = self.parser.parse(query)
 
@@ -101,7 +106,8 @@ class QueryExecutor:
     
     def _execute_entity_lookup(self, parsed: ParsedQuery, top_k: int) -> ExecutionResult:
         """Execute direct entity lookup by IDs."""
-        
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Executing entity lookup for parsed query:[/green] {parsed}\n")
         # Handle invalid entity references (e.g., "customer F029")
         if parsed.invalid_entity_reference:
             return ExecutionResult(
@@ -144,6 +150,8 @@ class QueryExecutor:
     
     def _execute_top_n(self, parsed: ParsedQuery, top_k: int) -> ExecutionResult:
         """Execute top/bottom N ranking query."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Executing top/bottom N query for parsed query:[/green] {parsed}\n")
         limit = parsed.limit or 5
         column = parsed.sort_by or "stake_gbp"  # Default to stake
         desc = parsed.sort_order == "desc" or parsed.aggregation == AggregationType.TOP_N
@@ -183,6 +191,8 @@ class QueryExecutor:
     
     def _execute_aggregate(self, parsed: ParsedQuery, top_k: int) -> ExecutionResult:
         """Execute aggregation query (count, sum, avg)."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Executing aggregate query for parsed query:[/green] {parsed}\n")
         calc_filters = self._build_calc_filters(parsed.filters)
         db_filters = self._build_db_filters(parsed)
         
@@ -214,6 +224,8 @@ class QueryExecutor:
     
     def _execute_filtered(self, parsed: ParsedQuery, top_k: int) -> ExecutionResult:
         """Execute filtered query (SQL WHERE only)."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Executing filtered query for parsed query:[/green] {parsed}\n")
         # Build database filters
         db_filters = self._build_db_filters(parsed)
         
@@ -248,6 +260,8 @@ class QueryExecutor:
     
     def _execute_hybrid(self, parsed: ParsedQuery, top_k: int) -> ExecutionResult:
         """Execute hybrid query (SQL filter + semantic ranking)."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Executing hybrid query for parsed query:[/green] {parsed}\n")
         # First: SQL filter to narrow candidates
         db_filters = self._build_db_filters(parsed)
         candidates = self.db.advanced_filter(**db_filters)
@@ -302,6 +316,8 @@ class QueryExecutor:
         Detects if query is looking for a team/player name and uses team-only
         search for best results (no document embedding noise).
         """
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Executing semantic query for parsed query:[/green] {parsed}\n")
         query = parsed.original_query
         
         # Detect if this is a team/player name search
@@ -339,6 +355,8 @@ class QueryExecutor:
         - Query has short, meaningful search terms (likely team/player names)
         - Query uses patterns like "involving X", "X bets", "bets on X"
         """
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Checking if query is a team/player search:[/green] '{parsed.original_query}'")
         # Common filler words to ignore
         filler_words = {
             'all', 'bets', 'bet', 'involving', 'involves', 'with', 'for',
@@ -377,6 +395,8 @@ class QueryExecutor:
     
     def _build_calc_filters(self, filters: Dict[str, Any]) -> Dict[str, Any]:
         """Convert parsed filters to calculator format."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Building calculator filters from:[/green] {filters}\n")
         if not filters:
             return {}
         
@@ -408,6 +428,8 @@ class QueryExecutor:
     
     def _build_db_filters(self, parsed: ParsedQuery) -> Dict[str, Any]:
         """Convert parsed query to database filter format."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Building database filters from parsed query:[/green] {parsed}\n")
         db_filters = {}
         
         filters = parsed.filters
@@ -435,6 +457,8 @@ class QueryExecutor:
     
     def _compute_customer_stats(self, customer_ids: List[str], results: List[RetrievalResult]) -> str:
         """Compute statistics for customer lookup."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Computing customer stats for IDs:[/green] {customer_ids}\n")
         # print(f"***** We are here 1 *****")
         lines = ["=" * 60]
         lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
@@ -466,6 +490,8 @@ class QueryExecutor:
     
     def _compute_bet_stats(self, results: List[RetrievalResult]) -> str:
         """Compute statistics for bet lookup."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Computing bet stats for results:[/green] {results}\n")
         # print(f"***** We are here 2 *****")
         lines = ["=" * 60]
         lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
@@ -497,6 +523,8 @@ class QueryExecutor:
         desc: bool
     ) -> str:
         """Compute statistics for top/bottom N query."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Computing top/bottom N stats for parsed query:[/green] {parsed}\n")
         # print(f"***** We are here 3 *****")
         lines = ["=" * 60]
         lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
@@ -548,6 +576,8 @@ class QueryExecutor:
     
     def _compute_aggregate_stats(self, parsed: ParsedQuery, calc_filters: Dict) -> str:
         """Compute statistics for aggregate query."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Computing aggregate stats for parsed query:[/green] {parsed}\n")
         # print(f"***** We are here 4 *****")
         lines = ["=" * 60]
         lines.append("COMPUTED FACTS (pre-calculated, DO NOT recalculate)")
@@ -609,6 +639,8 @@ class QueryExecutor:
     
     def _compute_filter_stats(self, parsed: ParsedQuery, calc_filters: Dict) -> str:
         """Compute statistics for filtered query."""
+        if DEBUG_MODE:
+            console.log(f"[green]DEBUG MODE: Computing filter stats for parsed query:[/green] {parsed}\n")
         # Same as aggregate stats but with filter context
         return self._compute_aggregate_stats(parsed, calc_filters)
 

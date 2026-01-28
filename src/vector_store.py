@@ -14,6 +14,9 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Set, Any
 import numpy as np
+from .config import DEBUG_MODE
+from rich.console import Console
+console = Console()
 
 # Try to import FAISS - fall back to brute force if not available
 try:
@@ -60,13 +63,16 @@ class VectorStore:
         content_hash: str
     ) -> None:
         """Add a single embedding to the store."""
+        if DEBUG_MODE:
+            console.log(f"[red]DEBUG MODE: Adding embedding for bet_id:[/red] {bet_id}")
         if bet_id in self._id_to_idx:
             # Update existing
             idx = self._id_to_idx[bet_id]
             if FAISS_AVAILABLE:
                 # FAISS doesn't support update - need to rebuild
                 # For now, just update the hash
-                self._content_hashes[bet_id] = content_hash
+                # self._content_hashes[bet_id] = content_hash
+                raise NotImplementedError("FAISS index update not implemented")
             else:
                 self._embeddings[idx] = embedding
                 self._content_hashes[bet_id] = content_hash
@@ -80,6 +86,7 @@ class VectorStore:
         
         # Normalize embedding for cosine similarity
         norm = np.linalg.norm(embedding)
+        # Let's avoid division by zero when turning the embeddings into unit vectors
         if norm > 0:
             embedding = embedding / norm
         
@@ -100,6 +107,8 @@ class VectorStore:
         content_hashes: List[str]
     ) -> None:
         """Add multiple embeddings at once (more efficient)."""
+        if DEBUG_MODE:
+            console.log(f"[red]DEBUG MODE: Adding batch of embeddings (count: {len(bet_ids)})[/red]")
         if len(bet_ids) != embeddings.shape[0]:
             raise ValueError("Number of IDs must match number of embeddings")
         
@@ -139,6 +148,8 @@ class VectorStore:
         Returns:
             List of (bet_id, similarity_score) tuples
         """
+        if DEBUG_MODE:
+            console.log(f"[red]DEBUG MODE: Searching for top_k={top_k} similar vectors[/red]")
         if len(self._id_to_idx) == 0:
             return []
         
@@ -146,13 +157,13 @@ class VectorStore:
         norm = np.linalg.norm(query_embedding)
         if norm > 0:
             query_embedding = query_embedding / norm
-        query_embedding = query_embedding.astype(np.float32).reshape(1, -1)
-        
+        query_embedding = query_embedding.astype(np.float32).reshape(1, -1) # to required data type for FAISS & also the 2D vector shape FAISS needs (.reshape(1, -1) is similar to arr.reshape(1, len(arr)))
+         
         if filter_ids is not None:
             # Filtered search - get more results then filter
             return self._filtered_search(query_embedding, top_k, filter_ids)
         
-        # Unfiltered search
+        # Unfiltered search; by default we use this 
         if FAISS_AVAILABLE:
             # FAISS search
             k = min(top_k, self._index.ntotal)
@@ -180,6 +191,8 @@ class VectorStore:
         Strategy: For small filter sets, compute scores only for filtered IDs.
         For large filter sets, get more results from index and filter.
         """
+        if DEBUG_MODE:
+            console.log(f"[red]DEBUG MODE: Performing filtered search with filter_ids count={len(filter_ids)}[/red]")
         filter_indices = [self._id_to_idx[bid] for bid in filter_ids if bid in self._id_to_idx]
         
         if not filter_indices:
@@ -187,7 +200,7 @@ class VectorStore:
         
         if FAISS_AVAILABLE:
             # For filtered search with FAISS, we have two strategies:
-            # 1. Small filter (<100): Compute scores directly for filtered items
+            # 1. Small filter (<=100): Compute scores directly for filtered items
             # 2. Large filter: Search more results and filter
             
             if len(filter_indices) <= 100:
@@ -196,7 +209,7 @@ class VectorStore:
                 for idx in filter_indices:
                     # Reconstruct the vector (FAISS IndexFlatIP supports this)
                     vec = self._index.reconstruct(idx)
-                    score = float(np.dot(query_embedding.flatten(), vec))
+                    score = float(np.dot(query_embedding.flatten(), vec)) # cosine similarity (for normalized vectors)
                     bet_id = self._idx_to_id[idx]
                     results.append((bet_id, score))
                 
@@ -235,6 +248,8 @@ class VectorStore:
         top_k: int
     ) -> List[Tuple[str, float]]:
         """Brute force search (O(N)) - fallback when FAISS not available."""
+        if DEBUG_MODE:
+            console.log(f"[red]DEBUG MODE: Performing brute-force search[/red]")
         scores = np.dot(self._embeddings, query_embedding.T).flatten()
         top_indices = np.argsort(scores)[::-1][:top_k]
         
@@ -251,6 +266,8 @@ class VectorStore:
     
     def needs_reembedding(self, bet_id: str, current_content: str) -> bool:
         """Check if a bet needs re-embedding due to content change."""
+        if DEBUG_MODE:
+            console.log(f"[red]DEBUG MODE: Checking if bet_id:[/red] {bet_id} [red]needs re-embedding[/red]")
         stored_hash = self.get_content_hash(bet_id)
         if stored_hash is None:
             return True  # New bet, needs embedding
@@ -268,6 +285,8 @@ class VectorStore:
         Returns:
             List of bet_ids that need re-embedding
         """
+        if DEBUG_MODE:
+            console.log(f"[red]DEBUG MODE: Checking for stale embeddings in batch (count: {len(bets_with_content)})[/red]")
         stale = []
         for bet_id, content in bets_with_content:
             if self.needs_reembedding(bet_id, content):
@@ -361,6 +380,8 @@ class EmbeddingVersionManager:
         Returns:
             List of bet_ids needing re-embedding
         """
+        if DEBUG_MODE:
+            console.log(f"[red]DEBUG MODE: Checking for stale embeddings in batch (count: {len(bets_with_content)})[/red]")
         stale = []
         
         with self._get_connection() as conn:

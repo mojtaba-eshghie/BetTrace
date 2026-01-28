@@ -18,11 +18,14 @@ from .config import (
     VALID_SPORTS,
     VALID_STATUSES,
     VALID_INCIDENTS,
+    DEBUG_MODE
 )
 from .models import Bet, RetrievalResult, QueryContext
 from .database import Database
 from .embedding_service import get_embedding_service
+from rich.console import Console
 
+console = Console()
 
 class Retriever:
     """
@@ -70,6 +73,8 @@ class Retriever:
         Returns:
             RetrievalResult if found, None otherwise
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Retrieving bet by ID:[/yellow] {bet_id}")
         # Normalize bet_id format (e.g., "42" -> "B0042")
         normalized_id = self._normalize_bet_id(bet_id)
         
@@ -88,6 +93,8 @@ class Retriever:
         Returns:
             List of RetrievalResults for the customer
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Retrieving bets by customer ID:[/yellow] {customer_id}")
         # Normalize customer_id format
         normalized_id = self._normalize_customer_id(customer_id)
         
@@ -101,6 +108,8 @@ class Retriever:
     
     def filter_by_status(self, status: str) -> List[RetrievalResult]:
         """Get all bets with a specific status."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Filtering bets by status:[/yellow] {status}")
         status = status.upper()
         if status not in VALID_STATUSES:
             return []
@@ -113,6 +122,8 @@ class Retriever:
     
     def filter_by_incident(self, incident_tag: str) -> List[RetrievalResult]:
         """Get all bets with a specific incident tag."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Filtering bets by incident tag:[/yellow] {incident_tag}")
         incident_tag = incident_tag.upper()
         if incident_tag not in VALID_INCIDENTS:
             return []
@@ -125,6 +136,8 @@ class Retriever:
     
     def filter_by_sport(self, sport: str) -> List[RetrievalResult]:
         """Get all bets for a specific sport."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Filtering bets by sport:[/yellow] {sport}")
         sport = sport.lower()
         if sport not in VALID_SPORTS:
             return []
@@ -137,6 +150,8 @@ class Retriever:
     
     def get_top_by_delay(self, limit: int = 10) -> List[RetrievalResult]:
         """Get bets with highest price_delay_ms."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Retrieving top bets by price delay (limit={limit})[/yellow]")
         bets = self.db.get_top_by_delay(limit)
         return [
             RetrievalResult(bet=bet, match_type="filtered")
@@ -145,6 +160,8 @@ class Retriever:
     
     def get_top_by_stake(self, limit: int = 10) -> List[RetrievalResult]:
         """Get bets with highest stakes."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Retrieving top bets by stake (limit={limit})[/yellow]")
         bets = self.db.get_top_by_stake(limit)
         return [
             RetrievalResult(bet=bet, match_type="filtered")
@@ -153,6 +170,8 @@ class Retriever:
     
     def filter_high_latency(self, threshold_ms: int = 1000) -> List[RetrievalResult]:
         """Get bets with latency above a threshold."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Filtering bets with price delay above {threshold_ms} ms[/yellow]")
         bets = self.db.filter_by_delay_range(min_ms=threshold_ms)
         return [
             RetrievalResult(bet=bet, match_type="filtered")
@@ -174,6 +193,11 @@ class Retriever:
         """
         Advanced multi-criteria filtering.
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Advanced filtering bets with criteria:[/yellow]\n"
+                        f" customer_ids={customer_ids}, sports={sports}, statuses={statuses},\n"
+                        f" incident_tags={incident_tags}, min_stake={min_stake}, max_stake={max_stake},\n"
+                        f" min_delay={min_delay}, max_delay={max_delay}, limit={limit}")
         bets = self.db.advanced_filter(
             customer_ids=customer_ids,
             sports=sports,
@@ -217,6 +241,10 @@ class Retriever:
         Returns:
             List of RetrievalResults ranked by similarity
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Performing semantic search:[/yellow] '{query}' "
+                        f"(top_k={top_k}, threshold={threshold}, "
+                        f"use_dual_embeddings={use_dual_embeddings}, team_only={team_only})")
         # Use default threshold if not specified
         if threshold is None:
             threshold = SIMILARITY_THRESHOLD
@@ -283,6 +311,8 @@ class Retriever:
         
         Filters out common query words, keeping only potential team names.
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting team terms from query:[/yellow] '{query}'")
         # Common words to ignore
         stop_words = {
             'all', 'bets', 'bet', 'involving', 'involves', 'with', 'for',
@@ -320,6 +350,9 @@ class Retriever:
         Returns:
             List of RetrievalResults
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Performing hybrid search:[/yellow] '{query}' "
+                        f"with filters={filters} (top_k={top_k})")
         # Generate query embedding
         query_embedding = self._get_embedding(query)
         
@@ -340,6 +373,8 @@ class Retriever:
         Simple text search using SQL LIKE matching.
         Good for searching event names, markets, etc.
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Performing text search:[/yellow] '{query}' (limit={limit})")
         bets = self.db.text_search(query, limit)
         return [
             RetrievalResult(bet=bet, match_type="text")
@@ -358,6 +393,8 @@ class Retriever:
         Returns:
             List of (customer_id, bet_count, bets) tuples
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Getting customers affected by incident:[/yellow] {incident_tag}")
         incident_tag = incident_tag.upper()
         customer_counts = self.db.get_customers_by_incident(incident_tag)
         
@@ -376,6 +413,8 @@ class Retriever:
         """
         Get a summary of bets affected by an incident.
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Getting incident summary for:[/yellow] {incident_tag}")
         incident_tag = incident_tag.upper()
         bets = self.db.filter_by_incident(incident_tag)
         
@@ -426,6 +465,9 @@ class Retriever:
         Returns:
             List of RetrievalResults
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Smart retrieval for query:[/yellow] '{query}' "
+                        f"with context={context} (top_k={top_k})")
         # Check for specific bet ID in query
         bet_id_match = self._extract_bet_id(query)
         if bet_id_match:
@@ -488,6 +530,8 @@ class Retriever:
             'B00042' -> 'B0042'  (extra zeros stripped)
             'b0042' -> 'B0042'
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Normalizing bet ID:[/yellow] {bet_id}")
         bet_id = bet_id.upper().strip()
         if bet_id.startswith("B"):
             num = bet_id[1:].lstrip('0') or '0'
@@ -505,6 +549,8 @@ class Retriever:
             'C0029' -> 'C029'  (extra zero stripped)
             'c029' -> 'C029'
         """
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Normalizing customer ID:[/yellow] {customer_id}")
         customer_id = customer_id.upper().strip()
         if customer_id.startswith("C"):
             num = customer_id[1:].lstrip('0') or '0'
@@ -514,11 +560,15 @@ class Retriever:
     
     def _extract_bet_id(self, text: str) -> Optional[str]:
         """Extract first bet ID from text (for backwards compatibility)."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting bet ID from text:[/yellow] '{text}'")
         all_ids = self._extract_all_bet_ids(text)
         return all_ids[0] if all_ids else None
     
     def _extract_all_bet_ids(self, text: str) -> List[str]:
         """Extract ALL bet IDs from text."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting all bet IDs from text:[/yellow] '{text}'")
         bet_ids = []
         
         # Find all explicit bet ID patterns (B0042, B042, B42, B00042)
@@ -545,11 +595,15 @@ class Retriever:
     
     def _extract_customer_id(self, text: str) -> Optional[str]:
         """Extract first customer ID from text (for backwards compatibility)."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting customer ID from text:[/yellow] '{text}'")
         all_ids = self._extract_all_customer_ids(text)
         return all_ids[0] if all_ids else None
     
     def _extract_all_customer_ids(self, text: str) -> List[str]:
         """Extract ALL customer IDs from text."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting all customer IDs from text:[/yellow] '{text}'")
         customer_ids = []
         
         # Find all explicit customer ID patterns (C029, C29, C0029)
@@ -575,6 +629,8 @@ class Retriever:
     
     def _extract_incident_tag(self, text: str) -> Optional[str]:
         """Extract incident tag from text."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting incident tag from text:[/yellow] '{text}'")
         text_upper = text.upper()
         for incident in VALID_INCIDENTS:
             if incident in text_upper:
@@ -600,6 +656,8 @@ class Retriever:
     
     def _extract_status(self, text: str) -> Optional[str]:
         """Extract status from text."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting status from text:[/yellow] '{text}'")
         text_upper = text.upper()
         for status in VALID_STATUSES:
             if status in text_upper:
@@ -608,6 +666,8 @@ class Retriever:
     
     def _extract_sport(self, text: str) -> Optional[str]:
         """Extract sport from text."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting sport from text:[/yellow] '{text}'")
         text_lower = text.lower()
         for sport in VALID_SPORTS:
             if sport in text_lower:
@@ -616,6 +676,8 @@ class Retriever:
     
     def _extract_number(self, text: str) -> Optional[int]:
         """Extract a number from text (for top-k queries)."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Extracting number from text:[/yellow] '{text}'")
         match = re.search(r'\b(\d+)\b', text)
         if match:
             return int(match.group(1))
@@ -623,6 +685,8 @@ class Retriever:
     
     def _is_latency_query(self, text: str) -> bool:
         """Check if query is about latency/delay."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Checking if query is about latency:[/yellow] '{text}'")
         latency_keywords = [
             "latency", "delay", "price_delay", "slow", "lag",
             "ms", "millisecond", "stale", "pricing"
@@ -632,6 +696,8 @@ class Retriever:
     
     def _is_stake_query(self, text: str) -> bool:
         """Check if query is about stake/amount."""
+        if DEBUG_MODE:
+            console.log(f"\n[yellow]DEBUG MODE: Checking if query is about stake:[/yellow] '{text}'")
         stake_keywords = [
             "stake", "amount", "value", "money", "£", "gbp",
             "wager", "wagered", "bet amount"

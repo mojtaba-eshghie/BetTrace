@@ -14,6 +14,9 @@ from typing import Optional, List, Any, Union
 from decimal import Decimal, ROUND_HALF_UP
 import json
 
+from .config import DEBUG_MODE
+from rich.console import Console
+console = Console()
 
 # =============================================================================
 # Currency Utility Functions
@@ -118,6 +121,8 @@ class Bet:
         Note: If this bet was loaded from database, returns the stored
         document to ensure consistency with the stored embedding.
         """
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Generating document for Bet ID:[/blue] {self.bet_id}")
         # Return stored document if available (ensures consistency with embedding)
         if self.stored_document is not None:
             return self.stored_document
@@ -127,6 +132,8 @@ class Bet:
     
     def _generate_document(self) -> str:
         """Generate the document text from bet fields."""
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Generating new document text for Bet ID:[/blue] {self.bet_id}")
         # Build a descriptive text representation
         incident_text = ""
         if self.incident_tag != "NONE":
@@ -147,6 +154,8 @@ class Bet:
     
     def to_summary(self) -> str:
         """Create a brief summary for display in results."""
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Generating summary for Bet ID:[/blue] {self.bet_id}")
         return (
             f"[{self.bet_id}] {self.sport.upper()} | {self.event_name} | "
             f"{self.market}: {self.selection} | £{self.stake_gbp} | "
@@ -156,6 +165,8 @@ class Bet:
     @classmethod
     def from_dict(cls, data: dict) -> "Bet":
         """Create a Bet from a dictionary."""
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Creating Bet from dict:[/blue] {data}")
         return cls(
             bet_id=str(data["bet_id"]),
             customer_id=str(data["customer_id"]),
@@ -177,6 +188,8 @@ class Bet:
         Args:
             row: Database row as dict with stake_pence column
         """
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Creating Bet from DB row (pence):[/blue] {row}")
         return cls(
             bet_id=str(row["bet_id"]),
             customer_id=str(row["customer_id"]),
@@ -195,7 +208,6 @@ class Bet:
 @dataclass
 class RetrievalResult:
     """Represents a retrieval result with optional similarity score."""
-    
     bet: Bet
     score: Optional[float] = None  # Similarity score for semantic search
     match_type: str = "exact"  # "exact", "filtered", "semantic", "hybrid"
@@ -212,7 +224,6 @@ class RetrievalResult:
 @dataclass
 class QueryContext:
     """Context for a retrieval query."""
-    
     query_text: str
     bet_ids: Optional[List[str]] = None
     customer_ids: Optional[List[str]] = None
@@ -227,6 +238,8 @@ class QueryContext:
     
     def has_filters(self) -> bool:
         """Check if any structured filters are set."""
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Checking filters in QueryContext:[/blue] {self}")
         return any([
             self.bet_ids,
             self.customer_ids,
@@ -257,6 +270,8 @@ def parse_event_teams(event_name: str) -> tuple:
     Returns:
         Tuple of (team1, team2) or (event_name, "") if parsing fails
     """
+    if DEBUG_MODE:
+        console.log(f"[blue]DEBUG MODE: Parsing event name into teams:[/blue] '{event_name}'")
     import re
     
     # Try common separators: " vs ", " v ", " - ", " @ "
@@ -294,6 +309,8 @@ def phonetic_normalize(text: str) -> str:
         "Celtics" → "CLTCS"
         "Celtcs"  → "CLTCS"  (same!)
     """
+    if DEBUG_MODE:
+        console.log(f"[blue]DEBUG MODE: Phonetic normalizing text:[/blue] '{text}'")
     if not text:
         return ""
     
@@ -329,6 +346,8 @@ def phonetic_normalize(text: str) -> str:
 
 
 def get_team_phonetic_variants(team_name: str) -> list:
+    if DEBUG_MODE:
+        console.log(f"[blue]DEBUG MODE: Getting phonetic variants for team name:[/blue] '{team_name}'")
     """
     Get the team name and its phonetic normalization for embedding.
     

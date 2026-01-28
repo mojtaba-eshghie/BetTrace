@@ -17,14 +17,15 @@ from typing import List, Optional
 from dataclasses import dataclass
 from openai import OpenAI
 
-from .config import OPENAI_API_KEY, LLM_MODEL, validate_config
+from .config import OPENAI_API_KEY, LLM_MODEL, validate_config, DEBUG_MODE
 from .models import Bet, RetrievalResult
 from .database import Database
 from .retrieval import Retriever
 from .calculator import SafeCalculator
 from .query_parser import ParsedQuery, QueryType, AggregationType, get_query_parser
 from .query_executor import QueryExecutor, ExecutionResult
-
+from rich.console import Console
+console = Console()
 
 # System prompt for the RAG assistant
 SYSTEM_PROMPT = """You are an internal operations assistant for a sports betting company. Your role is to answer questions about bet records accurately using ONLY the provided data and pre-computed statistics.
@@ -117,6 +118,8 @@ class RAGAssistant:
         Returns:
             RAGResponse with answer, citations, and metadata
         """
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: Received query:[/magenta] {query}")
         # Step 1: Execute query through unified pipeline
         exec_result = self.executor.execute(query, top_k)
         
@@ -177,6 +180,8 @@ class RAGAssistant:
     
     def _handle_empty_results(self, query: str, exec_result: ExecutionResult) -> RAGResponse:
         """Handle case where no results were found."""
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: No results found for query:[/magenta] {query}")
         parsed = exec_result.parsed_query
         
         # Provide helpful error message based on what was attempted
@@ -217,6 +222,8 @@ class RAGAssistant:
     
     def _build_context(self, exec_result: ExecutionResult, top_k: int) -> str:
         """Build context for LLM from execution results."""
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: Building context for LLM from execution results[/magenta]")
         parts = []
         parsed = exec_result.parsed_query
         
@@ -264,6 +271,8 @@ class RAGAssistant:
     
     def _format_bet_records(self, results: List[RetrievalResult], max_rows: int) -> str:
         """Format bet records for context."""
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: Formatting bet records for context (max_rows={max_rows})[/magenta]")
         if not results:
             return ""
         
@@ -288,6 +297,8 @@ class RAGAssistant:
     
     def _generate_answer(self, query: str, context: str, parsed: ParsedQuery) -> str:
         """Generate an answer using the LLM."""
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: Generating answer using LLM[/magenta]")
         
         # Check if query has analysis/summary intent
         analysis_keywords = ['summarize', 'analyze', 'explain', 'describe', 
@@ -363,6 +374,8 @@ NOW provide a similar detailed response for the user's question."""
     
     def _generate_fallback_answer(self, query: str, context: str, parsed: ParsedQuery) -> str:
         """Generate a fallback answer when LLM returns empty."""
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: Generating fallback answer due to empty LLM response[/magenta]")
         # Try to extract key info from context for a more helpful response
         lines = []
         
@@ -404,6 +417,8 @@ NOW provide a similar detailed response for the user's question."""
     
     def _extract_citations(self, answer: str, results: List[RetrievalResult]) -> List[str]:
         """Extract bet_id citations from the answer."""
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: Extracting citations from answer[/magenta]")
         valid_ids = {r.bet.bet_id for r in results}
         found_ids = re.findall(r'\bB\d{4}\b', answer)
         
@@ -423,6 +438,8 @@ NOW provide a similar detailed response for the user's question."""
         results: List[RetrievalResult]
     ) -> str:
         """Ensure the answer includes complete citations."""
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: Enforcing citations in answer[/magenta]")
         if not results:
             return answer
         
@@ -451,6 +468,8 @@ NOW provide a similar detailed response for the user's question."""
     
     def interactive_session(self):
         """Run an interactive Q&A session."""
+        if DEBUG_MODE:
+            console.log(f"[magenta]DEBUG MODE: Starting interactive session[/magenta]")
         print("\n" + "="*60)
         print("SPORTSBOOK RAG ASSISTANT")
         print("="*60)

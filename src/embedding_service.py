@@ -24,6 +24,10 @@ from openai import OpenAI, RateLimitError, APIError, APIConnectionError
 
 from .config import OPENAI_API_KEY, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, validate_config
 
+from .config import DEBUG_MODE
+
+from rich.console import Console
+console = Console()
 
 class EmbeddingService:
     """
@@ -70,6 +74,8 @@ class EmbeddingService:
         - APIConnectionError (network issues)
         - APIError (5xx server errors)
         """
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Starting retry with backoff for function:[/blue] {func.__name__}")
         last_exception = None
         
         for attempt in range(self.MAX_RETRIES):
@@ -109,6 +115,8 @@ class EmbeddingService:
         Returns:
             NumPy array of shape (EMBEDDING_DIMENSIONS,)
         """
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Embedding single text:[/blue] '{text}'")
         # Check cache first
         if use_cache:
             text_hash = self._text_hash(text)
@@ -157,6 +165,8 @@ class EmbeddingService:
         Returns:
             NumPy array of shape (len(texts), EMBEDDING_DIMENSIONS)
         """
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Embedding batch of texts (count: {len(texts)}):[/blue] {texts}")
         if not texts:
             return np.array([], dtype=np.float32).reshape(0, EMBEDDING_DIMENSIONS)
         
@@ -226,6 +236,8 @@ class EmbeddingService:
     
     def clear_cache(self):
         """Clear the embedding cache."""
+        if DEBUG_MODE:
+            console.log(f"[blue]DEBUG MODE: Clearing embedding cache[/blue]")
         self._cache.clear()
     
     def cache_stats(self) -> dict:

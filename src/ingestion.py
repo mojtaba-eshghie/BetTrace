@@ -16,11 +16,14 @@ from .config import (
     CSV_PATH, 
     EMBEDDING_MODEL,
     EMBEDDING_DIMENSIONS,
+    DEBUG_MODE
 )
 from .models import Bet
 from .database import Database
 from .embedding_service import get_embedding_service
+from rich.console import Console
 
+console = Console(record=DEBUG_MODE)
 
 class Ingestion:
     """

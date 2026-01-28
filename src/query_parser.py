@@ -25,6 +25,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 from enum import Enum
+from .config import DEBUG_MODE
+from rich.console import Console
+console = Console()
 
 
 class AggregationType(Enum):
@@ -385,6 +388,8 @@ class QueryParser:
         Returns:
             ParsedQuery object with extracted components
         """
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Parsing Query (QueryParser.parse): [{query}][/yellow]")
         # Initialize result
         parsed = ParsedQuery(original_query=query)
         query_lower = query.lower()
@@ -454,6 +459,8 @@ class QueryParser:
         
         Returns the invalid reference string if detected, None otherwise.
         """
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Detecting invalid entity references in query:[/yellow] {query}")
         # If we already found valid IDs, no problem
         if parsed.bet_ids or parsed.customer_ids:
             return None
@@ -499,6 +506,8 @@ class QueryParser:
         
         Returns "bet" or "customer" if detected, None otherwise.
         """
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Detecting incomplete ID queries in query:[/yellow] {query}")
         # If we already found valid IDs, the query is complete
         if parsed.bet_ids or parsed.customer_ids:
             return None
@@ -521,6 +530,8 @@ class QueryParser:
     
     def _extract_bet_ids(self, original: str, remaining: str) -> Tuple[List[str], str]:
         """Extract and normalize bet IDs."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Extracting bet IDs from query:[/yellow] {original}")
         bet_ids = []
         
         # Pattern: B0042, B42, etc.
@@ -541,6 +552,8 @@ class QueryParser:
     
     def _extract_customer_ids(self, original: str, remaining: str) -> Tuple[List[str], str]:
         """Extract and normalize customer IDs."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Extracting customer IDs from query:[/yellow] {original}")
         customer_ids = []
         
         # Pattern: C029, C29, etc.
@@ -561,6 +574,8 @@ class QueryParser:
     
     def _extract_filters(self, text: str) -> Tuple[Dict[str, Any], str]:
         """Extract structured filters from text."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Extracting filters from query:[/yellow] {text}")
         filters = {}
         remaining = text
         
@@ -598,6 +613,8 @@ class QueryParser:
     
     def _extract_stake_range(self, text: str) -> Dict[str, float]:
         """Extract stake range filters."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: : Extracting stake range from query:[/yellow] {text}")
         filters = {}
         
         # "over £50", "more than 50", "above £100"
@@ -625,6 +642,8 @@ class QueryParser:
     
     def _extract_delay_range(self, text: str) -> Dict[str, int]:
         """Extract delay range filters."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Extracting delay range from query:[/yellow] {text}")
         filters = {}
         
         # Patterns for "delay > 500ms", "delay over 1000", "latency > 500"
@@ -658,6 +677,8 @@ class QueryParser:
     
     def _extract_sorting(self, text: str) -> Tuple[Optional[Tuple[str, str]], str]:
         """Extract sorting information."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Extracting sorting from query:[/yellow] {text}")
         remaining = text
         
         # Check explicit sort keywords
@@ -679,6 +700,8 @@ class QueryParser:
     
     def _extract_limit(self, text: str) -> Tuple[Optional[int], str]:
         """Extract limit/count."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Extracting limit from query:[/yellow] {text}")
         remaining = text
         
         # "top 5", "first 10", "5 bets"
@@ -693,6 +716,8 @@ class QueryParser:
     
     def _extract_aggregation(self, text: str) -> Tuple[AggregationType, Optional[str], str]:
         """Extract aggregation type and column."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Extracting aggregation from query:[/yellow] {text}")
         remaining = text
         
         for keyword, agg_type in self.AGGREGATION_KEYWORDS.items():
@@ -712,6 +737,8 @@ class QueryParser:
     
     def _has_top_n_pattern(self, text: str) -> bool:
         """Check if query has a top/bottom N pattern for structured ranking."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Checking for top/bottom N pattern in query:[/yellow] {text}")
         has_top = any(kw in text for kw in self.TOP_N_KEYWORDS)
         has_bottom = any(kw in text for kw in self.BOTTOM_N_KEYWORDS)
         has_column = any(kw in text for kw in self.COLUMN_SYNONYMS.keys())
@@ -732,6 +759,8 @@ class QueryParser:
     
     def _infer_sort_column(self, text: str) -> Optional[str]:
         """Infer which column to sort by from context."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Inferring sort column from query:[/yellow] {text}")
         # Check for column synonyms in text
         for keyword, column in self.COLUMN_SYNONYMS.items():
             if keyword in text:
@@ -740,6 +769,8 @@ class QueryParser:
     
     def _is_general_aggregate(self, text: str) -> bool:
         """Check if query is asking for general aggregates."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Checking for general aggregate query in:[/yellow] {text}")
         # Use word boundary matching to avoid false positives like "football bets" matching "all bets"
         for kw in self.GENERAL_AGGREGATE_KEYWORDS:
             # For multi-word keywords, check exact phrase
@@ -754,6 +785,8 @@ class QueryParser:
     
     def _extract_semantic_terms(self, text: str) -> List[str]:
         """Extract terms that require semantic search."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Extracting semantic terms from remaining text:[/yellow] {text}")
         semantic_terms = []
         
         # Clean up remaining text
@@ -793,6 +826,8 @@ class QueryParser:
     
     def _calculate_confidence(self, parsed: ParsedQuery) -> float:
         """Calculate confidence score for parsing."""
+        if DEBUG_MODE:
+            console.log(f"[yellow]DEBUG MODE: :Calculating parse confidence for:[/yellow] {parsed}")
         confidence = 1.0
         
         # Lower confidence if we have semantic terms (couldn't fully parse)

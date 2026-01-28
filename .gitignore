@@ -214,3 +214,4 @@ repomix-output.txt
 
 data/*.db
 data/bets.db
+data/*.bin
