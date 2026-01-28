@@ -2,6 +2,8 @@
 
 A Retrieval-Augmented Generation (RAG) system for querying sports betting records using natural language. Built with a hybrid architecture combining structured SQL queries, semantic vector search, and LLM-powered response generation.
 
+[Quick access to acceptance tests.](ACCEPTANCE_TESTS.md)
+
 ## Table of Contents
 
 - [Features](#features)
