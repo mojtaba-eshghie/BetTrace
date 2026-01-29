@@ -30,7 +30,7 @@ CSV_PATH = Path(os.getenv("CSV_PATH", DATA_DIR / "bets.csv"))
 
 # Retrieval settings
 DEFAULT_TOP_K = 100
-SIMILARITY_THRESHOLD = 0.3  # Minimum cosine similarity for semantic search (lowered to catch more results)
+SIMILARITY_THRESHOLD = 0.8  # Minimum cosine similarity for semantic search (lowered to catch more results)
 
 # Schema definitions
 BET_COLUMNS = [

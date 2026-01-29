@@ -54,7 +54,7 @@ class VectorStore:
         
         if FAISS_AVAILABLE:
             # Use Inner Product index (equivalent to cosine sim for normalized vectors)
-            self._index = faiss.IndexFlatIP(dimension)
+            self._index = faiss.IndexFlatIP(dimension) # Creates index for inner product-based (for cosine similarity) search. In reality we do this in src.database.Database for team1, team2, and combined embeddings separately (3 FAISS database indices to do faster search).
     
     def add(
         self, 
@@ -160,18 +160,18 @@ class VectorStore:
         query_embedding = query_embedding.astype(np.float32).reshape(1, -1) # to required data type for FAISS & also the 2D vector shape FAISS needs (.reshape(1, -1) is similar to arr.reshape(1, len(arr)))
          
         if filter_ids is not None:
-            # Filtered search - get more results then filter
+            # If filtering is requested, 
             return self._filtered_search(query_embedding, top_k, filter_ids)
         
         # Unfiltered search; by default we use this 
         if FAISS_AVAILABLE:
             # FAISS search
             k = min(top_k, self._index.ntotal)
-            scores, indices = self._index.search(query_embedding, k)
+            scores, indices = self._index.search(query_embedding, k) # _index is just the default FAISS search that is good for <100k vectors database; it does the searching for us; it returns ndarrays of scores and indices (for batches of queries)
             
             results = []
-            for score, idx in zip(scores[0], indices[0]):
-                if idx >= 0 and idx in self._idx_to_id:
+            for score, idx in zip(scores[0], indices[0]): # index zero since we have only one query vector (FAISS supports batch queries)
+                if idx >= 0 and idx in self._idx_to_id: # sometimes FAISS returns -1 for empty results, so idx >= 0 checks if we have any result.
                     bet_id = self._idx_to_id[idx]
                     results.append((bet_id, float(score)))
             return results
@@ -200,8 +200,8 @@ class VectorStore:
         
         if FAISS_AVAILABLE:
             # For filtered search with FAISS, we have two strategies:
-            # 1. Small filter (<=100): Compute scores directly for filtered items
-            # 2. Large filter: Search more results and filter
+            # 1. Small filter (<=100): Compute scores directly for filtered items (manual dot product  →  top k)
+            # 2. Large filter: Search more results and filter (top k×10  →  filter  →  top k)
             
             if len(filter_indices) <= 100:
                 # Strategy 1: Direct computation for small filter sets
@@ -225,7 +225,7 @@ class VectorStore:
                 filter_set = set(filter_indices)
                 results = []
                 for score, idx in zip(scores[0], indices[0]):
-                    if idx in filter_set and idx in self._idx_to_id:
+                    if idx in filter_set and idx in self._idx_to_id: # check if idx is in filter set and a valid index (not -1); 
                         bet_id = self._idx_to_id[idx]
                         results.append((bet_id, float(score)))
                         if len(results) >= top_k:

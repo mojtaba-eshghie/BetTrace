@@ -684,7 +684,7 @@ class Database:
         self,
         query_embedding: np.ndarray,
         top_k: int = 10,
-        threshold: float = 0.0
+        threshold: float = 0.7
     ) -> List[Tuple[str, float]]:
         """
         Search using team-level embeddings (both team1 and team2).
@@ -721,6 +721,7 @@ class Database:
         # Filter by threshold and sort
         results = [(bet_id, score) for bet_id, score in scores.items() if score >= threshold]
         results.sort(key=lambda x: x[1], reverse=True)
+        print(results)
         return results[:top_k]
     
     def semantic_search_dual(
@@ -728,7 +729,7 @@ class Database:
         query_embedding: np.ndarray,
         top_k: int = 10,
         threshold: float = 0.0,
-        team_weight: float = 0.7
+        team_weight: float = 0.8
     ) -> List[Tuple[str, float]]:
         """
         Search using both document and team-level embeddings, merging results.

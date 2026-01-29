@@ -326,7 +326,7 @@ class QueryExecutor:
         
         try:
             # Use lower threshold for team searches (want max recall)
-            threshold = 0.7 if team_search else None  # None = use default
+            threshold = 0.8 if team_search else None  # None = use default
             
             results = self.retriever.semantic_search(
                 query, 

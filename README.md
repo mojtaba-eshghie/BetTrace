@@ -198,7 +198,7 @@ matches "Rapters" (stored as "RPTRS" embedding)
 ```python
 # SQL filter first, then semantic rerank
 1. SQL: Get all REJECTED bets
-2. Vector: Rerank by similarity to "suspicious activity"
+2. Vector: Rerank by similarity to "... selection market with Sun"
 3. Return top-k results
 ```
 

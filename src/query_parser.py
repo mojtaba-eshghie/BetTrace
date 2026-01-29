@@ -820,7 +820,7 @@ class QueryParser:
             # Filter out things that look like IDs or numbers
             meaningful_words = [w for w in remaining_words 
                                if not re.match(r'^[a-z]?\d+$', w)]
-            semantic_terms.extend(meaningful_words[:5])  # Limit to 5 terms
+            semantic_terms.extend(meaningful_words[:5])  # Limit to 5 terms just in case
         
         return semantic_terms
     
