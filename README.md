@@ -71,34 +71,35 @@ python main.py chat
 ---
 
 ## Architecture Overview
+[For a more detailed & descriptive architecture diagram click here.](diagrams/system-architecture.pdf) 
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           SPORTSBOOK RAG SYSTEM                              │
+│                           SPORTSBOOK RAG SYSTEM                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  User Query                                                                  │
-│      │                                                                       │
-│      ▼                                                                       │
-│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
-│  │ QueryParser  │────▶│QueryExecutor │────▶│    RAG       │                │
-│  │              │     │              │     │  Assistant   │                │
-│  │ • Entity IDs │     │ • Routing    │     │              │                │
-│  │ • Filters    │     │ • SQL/Vector │     │ • Context    │                │
-│  │ • Aggregates │     │ • Calculator │     │ • LLM Call   │                │
-│  │ • Intent     │     │              │     │ • Citations  │                │
-│  └──────────────┘     └──────────────┘     └──────────────┘                │
+│                                                                             │ 
+│  User Query                                                                 │ 
+│                                                                             │ 
+│                                                                             │
+│  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                 │
+│  │ QueryParser  │────▶│QueryExecutor │────▶│    RAG       │                 │
+│  │              │     │              │     │  Assistant   │                 │
+│  │ • Entity IDs │     │ • Routing    │     │              │                 │
+│  │ • Filters    │     │ • SQL/Vector │     │ • Context    │                 │
+│  │ • Aggregates │     │ • Calculator │     │ • LLM Call   │                 │
+│  │ • Intent     │     │              │     │ • Citations  │                 │
+│  └──────────────┘     └──────────────┘     └──────────────┘                 │
 │                              │                     │                        │
 │                              ▼                     ▼                        │
-│                       ┌─────────────┐       ┌─────────────┐                │
-│                       │  Database   │       │   OpenAI    │                │
-│                       │             │       │             │                │
-│                       │ • SQLite    │       │ • Embeddings│                │
-│                       │ • FAISS     │       │ • GPT-4     │                │
-│                       │ • Bets      │       │             │                │
-│                       │ • Embeddings│       │             │                │
-│                       └─────────────┘       └─────────────┘                │
-│                                                                              │
+│                       ┌─────────────┐       ┌─────────────┐                 │
+│                       │  Database   │       │   OpenAI    │                 │
+│                       │             │       │             │                 │
+│                       │ • SQLite    │       │ • Embeddings│                 │
+│                       │ • FAISS     │       │ • GPT-5-mini│                 │
+│                       │ • Bets      │       │             │                 │
+│                       │ • Embeddings│       │             │                 │
+│                       └─────────────┘       └─────────────┘                 │
+│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -498,7 +499,19 @@ To construct the context sent to the LLM, some parts are extracted directly from
 |---------|----------|
 | Good enough for teams | **No domain tuning**: Sports-specific terms may embed poorly. We may fine-tune our own embedding model. |
 
-### 10. Robust Benchmarking & CI/CD
+### 10. Query Retrieval Routing 
+The current implementation supports parsing of hybrid queries (combination of semantic similarity vector search, SQL operations, etc.) but the order of executing the parsed subqueries is not implemented yet. This results in a failures when for instance you execute the following: 
+
+```bash
+python main.py ask "Top 5 bets with delay under 500ms involving Real Madrid"
+```
+Which parses the query in the following form: 
+
+```python
+ParsedQuery(type=hybrid, filters={'status': 'SETTLED', 'min_delay': 200, 'max_delay': 400}, semantic=['involving', 'Real', 'Madrid'])  
+```
+
+### 11. Robust Benchmarking & CI/CD
 
 The project does not have a proper CI/CD pipeline set up (although we have unit test and acceptace tests); for real-world usage, we should first create this before moving to deploying of the features. Besides, 7 acceptance tests are not enough for evaulation; we may use ground truth from the company or automatically diversify the 7 cases to generate more test cases. 
 

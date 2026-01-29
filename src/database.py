@@ -721,7 +721,8 @@ class Database:
         # Filter by threshold and sort
         results = [(bet_id, score) for bet_id, score in scores.items() if score >= threshold]
         results.sort(key=lambda x: x[1], reverse=True)
-        print(results)
+        if DEBUG_MODE:
+            console.log("[cyan]DEBUG_MODE: Team-level search results:[/cyan]" + str(results))
         return results[:top_k]
     
     def semantic_search_dual(
