@@ -41,7 +41,7 @@ A Retrieval-Augmented Generation (RAG) system for querying sports betting record
 
 ```bash
 # Clone and setup
-cd sportsbook-rag
+cd BetTrace
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
