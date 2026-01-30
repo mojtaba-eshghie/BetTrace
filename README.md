@@ -391,7 +391,7 @@ def enforce_citations(answer, retrieved_bets):
     cited = re.findall(r'B\d{4}', answer)
     valid_ids = {b.bet_id for b in retrieved_bets}
     
-    # Filter to only valid citations
+    # Filter to only valid citations (which were retrieved through SafeCalculator part of the query)
     valid_citations = [id for id in cited if id in valid_ids]
     
     # Ensure Evidence line exists
@@ -473,10 +473,10 @@ To construct the context sent to the LLM, some parts are extracted directly from
 | No LLM call needed | **Edge cases**: Ambiguous queries may route incorrectly |
 
 
-### 6. Analysis Intent Detection (Keywords)
+### 6. Analysis Intent Detection (Query Parsing)
 | Benefit | Tradeoff |
 |---------|----------|
-| Simple implementation | **Hardcoded list**: "break it down" won't trigger analysis |
+| Simple implementation | **Hardcoded lists**: for instance, "break it down" is not among thoses lists will not trigger analysis (which is part of dynamic prompt instruction construction) |
 | Fast | **False positives**: For instance, "explain" might over-trigger |
 
 ### 7. Single LLM Call Architecture
@@ -497,7 +497,7 @@ To construct the context sent to the LLM, some parts are extracted directly from
 ### 9. Embedding Model (text-embedding-3-small)
 | Benefit | Tradeoff |
 |---------|----------|
-| Good enough for teams | **No domain tuning**: Sports-specific terms may embed poorly. We may fine-tune our own embedding model. |
+| Good enough for teams | **No domain tuning**: Sports-specific terms may embed poorly. We may fine-tune our own embedding model. Incurs costs; a smaller in-house fine-tuned embedding model is a better choice.|
 
 ### 10. Query Retrieval Routing 
 The current implementation supports parsing of hybrid queries (combination of semantic similarity vector search, SQL operations, etc.) but the order of executing the parsed subqueries is not implemented yet. This results in a failures when for instance you execute the following: 
@@ -515,7 +515,8 @@ ParsedQuery(type=hybrid, filters={'status': 'SETTLED', 'min_delay': 200, 'max_de
 
 The project does not have a proper CI/CD pipeline set up (although we have unit test and acceptace tests); for real-world usage, we should first create this before moving to deploying of the features. Besides, 7 acceptance tests are not enough for evaulation; we may use ground truth from the company or automatically diversify the 7 cases to generate more test cases. 
 
-
+### 12. Tradeoff Between Lexical and Embedding-based Team/Player Matching
+BetTrace includes both of them. Semantic matching might not be as important here, since for instance “Manchester United” vs “Manchester City” are semantically close but wrong match. Instead we should use lexical methods that match characters, for instance Levenshtein distance two strings is useful. Using RapidFuzz library, we measure how many single-character edits (insert/delete/replace) are needed to transform one string into the other, then converts that into a 0–100 score. The default threshold in our system is 70, and the default method is lexical. 
 
 ---
 ## Configuration
