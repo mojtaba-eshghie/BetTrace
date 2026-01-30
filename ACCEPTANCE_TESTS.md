@@ -107,34 +107,50 @@ Retrieved 1 bet(s) for context
 ## Test 3: Analytics — Top Latency Ranking
 
 ```bash
-python main.py ask "What happened with bet B0059? Explain the incident and latency." 
+python main.py ask "Find the top 5 highest price_delay_ms bets and summarize what happened." 
 ```
 
 ### Results for Test 3
 
 ```bash
-% python main.py ask "What happened with bet B0059? Explain the incident and latency." 
+% python main.py ask "Find the top 5 highest price_delay_ms bets and summarize what happened." 
+Question: Find the top 5 highest price_delay_ms bets and summarize what happened.
 
-Question: What happened with bet B0059? Explain the incident and latency.
-
+⠹ Thinking...
 ╭────────────────────────────────────────────────────────────────────────── Answer ───────────────────────────────────────────────────────────────────────────╮
-│ Summary (from computed facts):                                                                                                                              │
-│ Bet B0059 — Customer C076, Stake £10.00, Sport: football, Event: Juvetus vs Interr, Market: Asian Handicap → Away +0.5. Status: SETTLED. Incident:          │
-│ LATENCY_SPIKE. Delay: 4648ms.                                                                                                                               │
+│ Summary:                                                                                                                                                    │
+│ Total Stake of Top 5: £90.00                                                                                                                                │
+│ Average Delay of Top 5: 2887ms                                                                                                                              │
 │                                                                                                                                                             │
-│ List and description:                                                                                                                                       │
-│ - B0059 (Customer C076): Juvetus vs Interr — Status: SETTLED, Incident: LATENCY_SPIKE, Delay: 4648ms — This delay is notably high (normal is ~200ms; above  │
-│ 1000ms indicates issues), indicating a severe latency spike during this bet's pricing/placement.                                                            │
+│ Top 5 delayed bets (details and observations):                                                                                                              │
+│                                                                                                                                                             │
+│ - B0059 (Customer C076): Juvetus vs Interr — Status: SETTLED; Incident: LATENCY_SPIKE; Delay: 4648ms — very high (well above the 1000ms issue threshold).   │
+│ Stake: £10.00. Notable: highest delay of the group and extreme outlier.                                                                                     │
+│                                                                                                                                                             │
+│ - B0090 (Customer C121): Nadall vs Sinnner — Status: SETTLED; Incident: LATENCY_SPIKE; Delay: 2615ms — high. Stake: £15.00. Notable: same event as B0032    │
+│ (opposing selection), but this one is settled.                                                                                                              │
+│                                                                                                                                                             │
+│ - B0032 (Customer C120): Nadall vs Sinnner — Status: PENDING; Incident: LATENCY_SPIKE; Delay: 2466ms — high. Stake: £10.00. Notable: opposite selection to  │
+│ B0090 and still pending, which could create exposure or require reconciliation.                                                                             │
+│                                                                                                                                                             │
+│ - B0036 (Customer C122): Lakkers vs Celtcs — Status: PENDING; Incident: LATENCY_SPIKE; Delay: 2431ms — high. Stake: £25.00. Notable: basketball market;     │
+│ pending status may need intervention due to elevated latency.                                                                                               │
+│                                                                                                                                                             │
+│ - B0072 (Customer C055): Atletico Madird vs Valenica — Status: SETTLED; Incident: LATENCY_SPIKE; Delay: 2273ms — high. Stake: £30.00. Notable: largest      │
+│ stake among these and settled despite significant delay.                                                                                                    │
 │                                                                                                                                                             │
 │ Key insights:                                                                                                                                               │
-│ - The bet experienced a severe latency event (4648ms) well above the 1000ms issue threshold, yet the bet was ultimately settled.                            │
-│ - This is an anomaly worth reviewing for potential pricing integrity or customer-impact assessment given the magnitude of the delay.                        │
+│ - All top-5 delayed bets are flagged LATENCY_SPIKE with delays far above the normal ~200ms and above the 1000ms issue threshold.                            │
+│ - The average delay across these five is 2887ms and total stake is £90.00, concentrating risk on heavily delayed pricing.                                   │
+│ - There is a potentially concerning pair on the same tennis event (B0090 vs B0032) with opposing selections and different settlement states — this may      │
+│ warrant reconciliation.                                                                                                                                     │
+│ - Two bets remain PENDING (B0032, B0036) under high-latency conditions and may need manual review or monitoring.                                            │
 │                                                                                                                                                             │
-│ Evidence: [B0059]                                                                                                                                           │
+│ Evidence: [B0059, B0090, B0032, B0036, B0072]                                                                                                               │
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 
-Evidence: B0059
-Retrieved 1 bet(s) for context
+Evidence: B0059, B0090, B0032, B0036, B0072
+Retrieved 5 bet(s) for context
 ```
 
 ## Test 4: Analytics — Customer Summary

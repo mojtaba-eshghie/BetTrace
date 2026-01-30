@@ -19,13 +19,15 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any, Set
 from contextlib import contextmanager
 from decimal import Decimal
-from rich.console import Console
 
-from .models import Bet, RetrievalResult, to_decimal, to_pence, from_pence
-from .config import DATABASE_PATH, EMBEDDING_DIMENSIONS, DEBUG_MODE
+from .models import Bet, RetrievalResult, to_decimal, to_pence, from_pence, parse_event_teams
+from .config import DATABASE_PATH, EMBEDDING_DIMENSIONS, TEAM_MATCHING_METHOD, SPARSE_TEAM_THRESHOLD, DEBUG_MODE
 from .vector_store import VectorStore, compute_content_hash, EmbeddingVersionManager
 
+# Import console for debug logging
+from rich.console import Console
 console = Console()
+
 
 class Database:
     """
@@ -40,7 +42,7 @@ class Database:
     
     def __init__(self, db_path: Optional[Path] = None):
         """Initialize the database connection."""
-        self.db_path = db_path or DATABASE_PATH # input path or default hard-coded in the config.py file.
+        self.db_path = db_path or DATABASE_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Scalable vector storage using FAISS
@@ -48,12 +50,16 @@ class Database:
         # - Document: full bet context (broad semantic search)
         # - Team1: first team/player (precise team search)
         # - Team2: second team/player (precise team search)
-        self._vector_store = VectorStore(EMBEDDING_DIMENSIONS) # full bet document embedding
+        self._vector_store = VectorStore(EMBEDDING_DIMENSIONS)
         self._team1_vector_store = VectorStore(EMBEDDING_DIMENSIONS)
         self._team2_vector_store = VectorStore(EMBEDDING_DIMENSIONS)
         
         # Legacy compatibility - keep bet_ids list for ID lookups
         self._bet_ids: List[str] = []
+        
+        # Sparse team matcher for edit-distance based team search
+        # Lazily initialized when first needed
+        self._sparse_matcher = None
         
         # Embedding version manager
         self._version_manager = EmbeddingVersionManager(self.db_path)
@@ -526,7 +532,7 @@ class Database:
     
     def load_embeddings_to_memory(self):
         """
-        Load all embeddings into FAISS vector stores for fast similarity search (vectors from database to memory).
+        Load all embeddings into FAISS vector stores for fast similarity search.
         
         Loads three sets of embeddings:
         - Document embeddings: for broad semantic search
@@ -536,8 +542,6 @@ class Database:
         Uses FAISS for efficient O(log N) approximate nearest neighbor search.
         Falls back to brute force if FAISS is not installed.
         """
-        if DEBUG_MODE:
-            console.log("[cyan]DEBUG MODE: load_embeddings_to_memory called[/cyan]")
         with self._get_connection() as conn:
             cursor = conn.cursor()
             
@@ -548,7 +552,7 @@ class Database:
             has_team1_embedding = 'team1_embedding' in columns
             has_team2_embedding = 'team2_embedding' in columns
             
-            # Build SELECT clause based on available columns (dynamic query building to prevent crashes when columns are missing)
+            # Build SELECT clause based on available columns
             select_cols = ["bet_id", "embedding"]
             if has_content_hash:
                 select_cols.append("content_hash")
@@ -560,7 +564,6 @@ class Database:
             cursor.execute(f"SELECT {', '.join(select_cols)} FROM embeddings ORDER BY bet_id")
             rows = cursor.fetchall()
             
-            # Early exit if no embeddings (likely fresh database)
             if not rows:
                 self._vector_store.clear()
                 self._team1_vector_store.clear()
@@ -570,10 +573,11 @@ class Database:
             
             self._bet_ids = [row["bet_id"] for row in rows]
             
-            # Embedding dimension validation before loading
+            # Validate embedding dimensions before loading
             first_embedding = np.frombuffer(rows[0]["embedding"], dtype=np.float32)
             actual_dim = len(first_embedding)
             expected_dim = EMBEDDING_DIMENSIONS
+            
             if actual_dim != expected_dim:
                 stored_config = self.get_embedding_config()
                 if stored_config:
@@ -592,19 +596,16 @@ class Database:
                         f"  Solution: Delete the database and re-ingest."
                     )
             
-            # Load document embeddings (# from embedding BLOB out of the database to numpy array using np.frombuffer)
+            # Load document embeddings
             bet_ids = [row["bet_id"] for row in rows]
             embeddings = np.vstack([
-                np.frombuffer(row["embedding"], dtype=np.float32) 
+                np.frombuffer(row["embedding"], dtype=np.float32)
                 for row in rows
             ])
             
-            # We're using content hashes for stale embedding detection (although not useful for this version...)
             content_hashes = [row["content_hash"] or "" for row in rows] if has_content_hash else ["" for _ in rows]
             
-            # Clear the vector store (in case of re-loading) 
             self._vector_store.clear()
-            # Add all document embeddings to the main vector store
             self._vector_store.add_batch(bet_ids, embeddings, content_hashes)
             
             # Load team1 embeddings if available
@@ -629,7 +630,7 @@ class Database:
             
             # Load team2 embeddings if available
             self._team2_vector_store.clear()
-            if has_team2_embedding: # flag is determined by the existing of this column in the database.
+            if has_team2_embedding:
                 team2_embeddings_list = []
                 valid_bet_ids = []
                 for row in rows:
@@ -641,12 +642,119 @@ class Database:
                             valid_bet_ids.append(row["bet_id"])
                 
                 if team2_embeddings_list:
-                    team2_embeddings = np.vstack(team2_embeddings_list) # vertically stacks the arrays in the list into a single 2D array (rows x columns).
+                    team2_embeddings = np.vstack(team2_embeddings_list)
                     self._team2_vector_store.add_batch(
                         valid_bet_ids, 
                         team2_embeddings, 
                         ["" for _ in valid_bet_ids]
                     )
+        
+        # Build sparse team index if using sparse matching
+        if TEAM_MATCHING_METHOD == "sparse":
+            self._build_sparse_team_index()
+    
+    def _build_sparse_team_index(self) -> None:
+        """
+        Build the sparse team index from event names in the database.
+        
+        Extracts team names from all events and builds an index for
+        fast edit-distance based matching using rapidfuzz.
+        """
+        if DEBUG_MODE:
+            console.log("[cyan]DEBUG MODE: Building sparse team index[/cyan]")
+        
+        from .sparse_matcher import SparseTeamMatcher
+        
+        # Get all event names and bet_ids from database
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT bet_id, event_name FROM bets")
+            rows = cursor.fetchall()
+        
+        if not rows:
+            self._sparse_matcher = SparseTeamMatcher()
+            return
+        
+        # Extract teams and build mapping
+        all_teams: Set[str] = set()
+        team_to_bet_ids: Dict[str, Set[str]] = {}
+        
+        for row in rows:
+            bet_id = row["bet_id"]
+            event_name = row["event_name"]
+            
+            # Parse event into team1 and team2
+            team1, team2 = parse_event_teams(event_name)
+            
+            # Add team1
+            if team1:
+                all_teams.add(team1)
+                if team1 not in team_to_bet_ids:
+                    team_to_bet_ids[team1] = set()
+                team_to_bet_ids[team1].add(bet_id)
+            
+            # Add team2
+            if team2:
+                all_teams.add(team2)
+                if team2 not in team_to_bet_ids:
+                    team_to_bet_ids[team2] = set()
+                team_to_bet_ids[team2].add(bet_id)
+        
+        # Build the sparse matcher
+        self._sparse_matcher = SparseTeamMatcher(threshold=SPARSE_TEAM_THRESHOLD)
+        self._sparse_matcher.build_index(list(all_teams), team_to_bet_ids)
+        
+        if DEBUG_MODE:
+            console.log(f"[cyan]DEBUG MODE: Built sparse index with {self._sparse_matcher.team_count} teams[/cyan]")
+    
+    def sparse_search_teams(
+        self,
+        query: str,
+        top_k: int = 10,
+        threshold: Optional[float] = None
+    ) -> List[Tuple[str, float]]:
+        """
+        Search for bets using sparse edit-distance based team matching.
+        
+        This is an alternative to embedding-based team search that:
+        - Works offline (no API calls needed)
+        - Is faster (<1ms vs ~15ms for embeddings)
+        - Handles typos via character-level similarity
+        
+        Args:
+            query: Team name to search for (can be misspelled)
+            top_k: Number of results to return
+            threshold: Minimum similarity score (0-100). Uses config default if None.
+            
+        Returns:
+            List of (bet_id, similarity_score) tuples, score normalized to 0-1
+        """
+        if DEBUG_MODE:
+            console.log(f"[cyan]DEBUG MODE: sparse_search_teams called with query: '{query}'[/cyan]")
+        
+        # Ensure sparse index is built
+        if self._sparse_matcher is None:
+            self._build_sparse_team_index()
+        
+        if self._sparse_matcher is None or self._sparse_matcher.team_count == 0:
+            return []
+        
+        # Get matching bet IDs
+        results = self._sparse_matcher.find_bet_ids_for_query(
+            query, 
+            threshold=threshold
+        )
+        
+        # Normalize scores from 0-100 to 0-1 for consistency with embedding search
+        normalized_results = [(bet_id, score / 100.0) for bet_id, score in results]
+        
+        return normalized_results[:top_k]
+    
+    def get_sparse_matcher(self):
+        """Get the sparse team matcher instance (for debugging/testing)."""
+        if self._sparse_matcher is None:
+            self._build_sparse_team_index()
+        return self._sparse_matcher
     
     def semantic_search(
         self,
@@ -665,16 +773,13 @@ class Database:
         Returns:
             List of (bet_id, similarity_score) tuples
         """
-
-        if DEBUG_MODE:
-            console.log("[cyan]DEBUG MODE: semantic_search called[/cyan]")
         if self._vector_store.size() == 0:
             self.load_embeddings_to_memory()
         
         if self._vector_store.size() == 0:
             return []
         
-        # Use FAISS vector store for efficient search; also we do unfiltered search here (third argument is not passed, filter_ids=None by default)
+        # Use FAISS vector store for efficient search
         results = self._vector_store.search(query_embedding, top_k=top_k)
         
         # Filter by threshold
@@ -684,7 +789,7 @@ class Database:
         self,
         query_embedding: np.ndarray,
         top_k: int = 10,
-        threshold: float = 0.7
+        threshold: float = 0.0
     ) -> List[Tuple[str, float]]:
         """
         Search using team-level embeddings (both team1 and team2).
@@ -701,8 +806,6 @@ class Database:
         Returns:
             List of (bet_id, max_similarity_score) tuples
         """
-        if DEBUG_MODE:
-            console.log("[cyan]DEBUG MODE: semantic_search_teams called[/cyan]")
         if self._team1_vector_store.size() == 0:
             self.load_embeddings_to_memory()
         
@@ -721,8 +824,6 @@ class Database:
         # Filter by threshold and sort
         results = [(bet_id, score) for bet_id, score in scores.items() if score >= threshold]
         results.sort(key=lambda x: x[1], reverse=True)
-        if DEBUG_MODE:
-            console.log("[cyan]DEBUG_MODE: Team-level search results:[/cyan]" + str(results))
         return results[:top_k]
     
     def semantic_search_dual(
@@ -730,7 +831,7 @@ class Database:
         query_embedding: np.ndarray,
         top_k: int = 10,
         threshold: float = 0.0,
-        team_weight: float = 0.8
+        team_weight: float = 0.7
     ) -> List[Tuple[str, float]]:
         """
         Search using both document and team-level embeddings, merging results.
@@ -748,8 +849,6 @@ class Database:
         Returns:
             List of (bet_id, combined_score) tuples, sorted by score descending
         """
-        if DEBUG_MODE:
-            console.log("[cyan]DEBUG MODE: semantic_search_dual called[/cyan]")
         if self._vector_store.size() == 0:
             self.load_embeddings_to_memory()
         
@@ -805,8 +904,6 @@ class Database:
         - final_score = semantic_weight * semantic_score + (1 - semantic_weight) * sql_score
         - This requires defining what "sql_score" means for your use case
         """
-        if DEBUG_MODE:
-            console.log("[cyan]DEBUG MODE: hybrid_search called[/cyan]")
         # Get filtered bets via SQL
         filtered_bets = self.advanced_filter(**filters)
         
@@ -864,8 +961,6 @@ class Database:
         Returns:
             List of bet_ids that need re-embedding
         """
-        if DEBUG_MODE:
-            console.log("[cyan]DEBUG MODE: find_stale_embeddings called[/cyan]")
         stale_ids = []
         
         with self._get_connection() as conn:
